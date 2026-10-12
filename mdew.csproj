@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>mdew</AssemblyName>
+    <RootNamespace>mdew</RootNamespace>
+    <!-- アプリ名（タイトルバー等に表示する。Program.AppName 参照）・作成者・著作権の表示。
+         エクスプローラーで exe のプロパティ→「詳細」に表示される -->
+    <AssemblyTitle>mdew</AssemblyTitle>
+    <Product>mdew</Product>
+    <Authors></Authors>
+    <Company></Company>
+    <Copyright>Copyright © 2026 tanno-seiichi</Copyright>
+    <!-- アプリのバージョン（タイトルバーに表示する。Program.Version 参照）。
+         4桁で書くと、ファイルバージョンと製品バージョンが同じ表示（0.0.1.0）になる -->
+    <Version>0.0.1.0</Version>
+    <!-- バージョンの表示に、ソース管理のリビジョン（+xxxx）を付けない -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- アプリのアイコン -->
+    <ApplicationIcon>images\mde.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 画面側（HTML・JavaScript・CSS）は、ビルドせずにそのまま実行フォルダの web へコピーする -->
+    <Content Include="web\**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- サードパーティのライセンス表示。実行フォルダへコピーし、バージョン情報のウィンドウから開く。
+         NuGet のパッケージを追加・更新した時は、この中のバージョン・ライセンス文も直す -->
+    <Content Include="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- バージョン情報のウィンドウ（dialog\AboutWindow）に表示するアイコン。exe の中に埋め込む -->
+    <None Remove="images\mde.png" />
+    <Resource Include="images\mde.png" />
+  </ItemGroup>
+</Project>

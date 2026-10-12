@@ -1,0 +1,162 @@
+/* mdew：画面全体のレイアウトと、mde に近い見た目 */
+/* ===== フォント・文字の大きさ（ここを書き換えて試せます） =====
+   フォントは左から順に、PC に入っているものが使われます（日本語が無いフォントの場合、日本語の文字だけ
+   次のフォントで表示されます）。フォント名に空白を含む場合は ' ' で囲みます。 */
+/* オリジナルスタイル
+:root {
+  --ui-font: 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', sans-serif;
+  --doc-font: 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Segoe UI', sans-serif;
+  --doc-font-size: 16px;
+  --doc-line-height: 1.75;
+  --code-font: Consolas, 'Yu Gothic UI', monospace;
+  --code-font-size: 0.92em;
+  --code-block-font-size: 14px;
+  --code-block-line-height: 1.5;
+  --line: #dddfe2;
+  --pane-bg: #f6f7f9;
+  --code-bg: #ece8dc;
+  --code-block-bg: #ece8dc;
+  --code-border: transparent;
+  --code-text: #333333;
+  --text: #1c1c1c;
+}
+*/
+/* Typoraスタイル */
+:root {
+  --ui-font: 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', sans-serif;
+  --doc-font: 'Meiryo', 'Yu Gothic', sans-serif;
+  --doc-font-size: 16px;
+  --doc-line-height: 1.75;
+  --code-font: Consolas, 'Meiryo', monospace;
+  --code-font-size: 0.92em;
+  --code-block-font-size: 14px;
+  --code-block-line-height: 1.5;
+  --line: #dddfe2;
+  --pane-bg: #f6f7f9;
+  --code-bg: #f3f4f4;
+  --code-block-bg: #f3f4f4;
+  --code-border: #e7eaed;
+  --text: #1c1c1c;
+}
+
+html, body { height: 100%; margin: 0; }
+body { font-family: var(--ui-font); background: #ffffff; color: var(--text); }
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+#menubar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--pane-bg);
+  font-size: 13px;
+}
+#menubar button {
+  font: inherit; padding: 3px 10px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; cursor: pointer;
+}
+#menubar button:hover { background: #e6e8eb; border-color: var(--line); }
+#menubar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
+
+#body { flex: 1; display: flex; min-height: 0; }
+#outline {
+  width: 220px; flex: none; overflow: auto; border-right: 1px solid var(--line);
+  background: var(--pane-bg); font-size: 13px;
+}
+body.no-outline #outline { display: none; } /* メニュー「表示」→「アウトラインを表示」で切り替え */
+.pane-title { padding: 8px 12px 4px; color: #777; font-size: 12px; }
+#outline-list { list-style: none; margin: 0; padding: 0 0 12px; }
+#outline-list li { padding: 3px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#outline-list li:hover { background: #e6e8eb; }
+#outline-list .lv2 { padding-left: 24px; }
+#outline-list .lv3 { padding-left: 36px; }
+#outline-list .lv4, #outline-list .lv5, #outline-list .lv6 { padding-left: 48px; }
+
+#editor-wrap { flex: 1; overflow: auto; }
+
+/* ===== 文書の見た目 ===== */
+#doc {
+  max-width: 980px; margin: 0 auto; padding: 24px 48px 120px;
+  font-family: var(--doc-font); font-size: var(--doc-font-size); line-height: var(--doc-line-height); outline: none;
+  word-wrap: break-word;
+}
+#doc > :first-child { margin-top: 0; }
+#doc p { margin: 0 0 0.8em; }
+/* 見出しの大きさは本文の文字の大きさ（--doc-font-size）に対する比率 */
+#doc h1, #doc h2, #doc h3, #doc h4, #doc h5, #doc h6 { line-height: 1.4; margin: 1.2em 0 0.6em; font-weight: 700; }
+#doc h1 { font-size: 1.875em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
+#doc h2 { font-size: 1.5em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
+#doc h3 { font-size: 1.25em; }
+#doc h4 { font-size: 1.0625em; }
+#doc h5, #doc h6 { font-size: 1em; }
+#doc ul, #doc ol { margin: 0 0 0.8em; padding-left: 1.8em; }
+#doc li > ul, #doc li > ol { margin-bottom: 0; }
+#doc ul { list-style-type: disc; }
+#doc ul ul { list-style-type: circle; }
+#doc ul ul ul { list-style-type: square; }
+/* チェックボックスは箇条書きの記号と同じ位置（項目の左側）に置き、文字の位置・入れ子の字下げ幅を
+   通常の箇条書きと揃える */
+#doc li.task { list-style: none; position: relative; }
+#doc li.task > input[type=checkbox] {
+  position: absolute; left: -1.35em; top: 0.48em; margin: 0; width: 0.85em; height: 0.85em; cursor: pointer;
+}
+#doc blockquote { margin: 0 0 0.8em; padding: 0 1em; border-left: 4px solid #d0d7de; color: #555; }
+#doc blockquote > :last-child { margin-bottom: 0; }
+#doc hr { border: none; border-top: 2px solid #d0d7de; margin: 1.2em 0; }
+#doc code {
+  font-family: var(--code-font); font-size: var(--code-font-size); color: var(--code-text);
+  background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 3px; padding: 1px 4px 0;
+}
+#doc pre {
+  font-family: var(--code-font); font-size: var(--code-block-font-size); line-height: var(--code-block-line-height);
+  color: var(--code-text); background: var(--code-block-bg); border: 1px solid var(--code-border); border-radius: 3px;
+  padding: 8px 16px; margin: 0 0 0.8em; white-space: pre-wrap;
+}
+#doc pre code { background: none; border: none; padding: 0; font-size: inherit; }
+#doc pre[data-info]:not([data-info=""])::before {
+  content: attr(data-info); display: block; float: right; color: #999; font-size: 12px; user-select: none;
+}
+#doc .md-raw {
+  font-family: var(--code-font); white-space: pre-wrap; color: #777; font-size: 14px;
+  margin: 0 0 0.8em; padding: 2px 6px; border-left: 3px solid #e3e3e3;
+}
+#doc table { border-collapse: collapse; margin: 0 0 0.8em; }
+#doc th, #doc td { border: 1px solid #c8ccd1; padding: 4px 10px; min-width: 3em; vertical-align: top; }
+#doc th { background: #f1f3f5; }
+#doc img { max-width: 100%; vertical-align: bottom; }
+#doc a { color: #0b62c4; text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
+#doc mark { background: #fff3a3; }
+
+#statusbar {
+  display: flex; gap: 16px; padding: 3px 10px; border-top: 1px solid var(--line);
+  background: var(--pane-bg); font-size: 12px; color: #555;
+  line-height: 18px; min-height: 18px; /* 表示する文字が無い時も高さを変えない */
+}
+body.no-statusbar #statusbar { display: none; } /* メニュー「表示」→「ステータスバーを表示」で切り替え */
+#status-dirty { color: #c0392b; min-width: 4em; }
+#status-host { margin-left: auto; }
+#status-link { color: #0b62c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Debug ビルドの時だけ表示する部分（停止・入力遅延の回数。ホストから init で debug が届くと body に debug を付ける） */
+.debug-only { display: none; }
+body.debug .debug-only { display: inline; }
+
+/* 右クリックのメニュー・「ファイル」のメニュー */
+.md-menu {
+  position: fixed; z-index: 100; min-width: 160px; padding: 4px 0;
+  background: #ffffff; border: 1px solid #c8ccd1; border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); font-family: var(--ui-font); font-size: 13px;
+}
+.md-menu button {
+  display: flex; align-items: center; width: 100%; padding: 5px 16px 5px 6px; border: none; background: none;
+  text-align: left; font: inherit; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.md-menu button .check { width: 18px; flex: none; text-align: center; color: #0b62c4; }
+.md-menu button .key { margin-left: auto; padding-left: 28px; color: #888; font-size: 12px; }
+.md-menu button:disabled .key { color: #bbb; }
+.md-menu button:hover:not(:disabled) { background: #e8f0fe; }
+.md-menu button:disabled { color: #aaa; cursor: default; }
+.md-menu hr { border: none; border-top: 1px solid #e3e5e8; margin: 4px 0; }
+.md-menu .heading { padding: 4px 16px 2px 10px; color: #888; font-size: 12px; cursor: default; } /* 選べない見出し */
+
+/* アウトラインとの境界（ドラッグで幅を変更、ダブルクリックで既定の幅に戻す） */
+#splitter { width: 6px; margin-left: -3px; margin-right: -3px; flex: none; cursor: col-resize; position: relative; z-index: 2; }
+#splitter:hover, body.resizing #splitter { background: rgba(11, 98, 196, 0.25); }
+body.no-outline #splitter { display: none; }
+body.resizing { cursor: col-resize; user-select: none; }
