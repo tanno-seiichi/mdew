@@ -137,6 +137,95 @@ body.no-statusbar #statusbar { display: none; } /* メニュー「表示」→�
 .debug-only { display: none; }
 body.debug .debug-only { display: inline; }
 
+/* ソースモード（Markdown のソースを直接編集する。背景の色・余白は mde と同じ）。入力欄（#source）と、
+   その後ろに重ねる要素（#source-backdrop。検索の色・行の位置を測る）は、文字の配置がまったく同じになるようにする */
+#source-wrap { display: none; position: relative; height: 100%; }
+body.source-mode #doc { display: none; }
+body.source-mode #source-wrap { display: block; }
+body.source-mode #editor-wrap { overflow: hidden; }
+#source, #source-backdrop {
+  position: absolute; inset: 0; margin: 0; border: 0; box-sizing: border-box; padding: 32px 40px;
+  font-family: var(--doc-font); font-size: var(--doc-font-size); line-height: 1.6; letter-spacing: normal;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 4;
+  overflow-x: hidden; overflow-y: scroll;
+}
+#source-backdrop { background: #f0f0f0; color: transparent; pointer-events: none; }
+#source-backdrop mark { color: transparent; background: #ffe166; }
+#source-backdrop mark.current { background: #ffa54d; }
+#source { background: transparent; color: #000000; resize: none; outline: none; }
+
+/* フォルダビュー（「フォルダを開く...」で開いた時だけ表示。行の色は mde と同じ） */
+#folder {
+  display: none; width: 200px; flex: none; overflow: auto; border-right: 1px solid var(--line);
+  background: var(--pane-bg); font-size: 13px;
+}
+#folder-splitter { display: none; }
+body.folder-open #folder { display: block; }
+body.folder-open #folder-splitter { display: block; }
+body.folder-open.no-folderpane #folder, body.folder-open.no-folderpane #folder-splitter { display: none; }
+#folder .pane-header { display: flex; align-items: center; padding-right: 6px; }
+#folder .pane-header .pane-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#folder-reopen {
+  font: inherit; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: pointer;
+}
+#folder-reopen:hover { background: #e6e8eb; border-color: var(--line); }
+#folder-tree, #folder-tree ul { list-style: none; margin: 0; padding: 0; }
+#folder-tree { padding-bottom: 12px; }
+#folder-tree .row {
+  white-space: nowrap; cursor: pointer; padding-top: 2px; padding-bottom: 2px; padding-right: 8px;
+  border: 1px solid transparent;
+}
+#folder-tree .row:hover { background: #e6e8eb; }
+#folder-tree .toggle { display: inline-block; width: 14px; color: #777; font-size: 11px; }
+#folder-tree .row.current { background: #cbe8f6; }
+#folder-tree .row.hit { background: #ffe166; }
+#folder-tree .row.current.hit { border-color: #26a0da; }
+#folder-splitter { width: 6px; margin-left: -3px; margin-right: -3px; flex: none; cursor: col-resize; position: relative; z-index: 2; }
+#folder-splitter:hover, body.resizing #folder-splitter { background: rgba(11, 98, 196, 0.25); }
+
+/* 検索と置換：見つかった箇所の色（黄色）、今の箇所（オレンジ）。mde と同じ色 */
+::highlight(find-all) { background-color: #ffe166; }
+::highlight(find-current) { background-color: #ffa54d; }
+#outline-list li.search-hit { background: #ffe166; }
+#outline-list li.search-current { background: #cbe8f6; }
+#outline-list li.search-hit.search-current { background: #ffe166; outline: 1px solid #26a0da; outline-offset: -1px; }
+
+/* 検索と置換のパネル（右上に重ねて表示。見出しをドラッグして動かせる） */
+#find-panel {
+  position: fixed; top: 40px; right: 24px; z-index: 80; width: 540px; max-width: calc(100vw - 32px);
+  background: #ffffff; border: 1px solid #c8ccd1; border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-family: var(--ui-font); font-size: 13px; color: var(--text);
+}
+#find-panel[hidden] { display: none; }
+#find-header {
+  display: flex; align-items: center; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line);
+  background: var(--pane-bg); border-radius: 6px 6px 0 0; cursor: move; user-select: none; font-weight: bold;
+}
+#find-header span { flex: 1; }
+#find-close { font: inherit; border: none; background: transparent; cursor: pointer; padding: 0 6px; font-size: 16px; }
+#find-close:hover { background: #e6e8eb; border-radius: 4px; }
+.find-body { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.find-body input[type="text"] { width: 100%; box-sizing: border-box; font-family: Consolas, var(--ui-font); font-size: 13px; padding: 3px 6px; }
+#find-replace-box summary { cursor: pointer; margin-bottom: 4px; }
+.find-row { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.find-row label { display: inline-flex; align-items: center; gap: 3px; }
+.find-label { color: #555; }
+.find-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.find-buttons button { font: inherit; padding: 3px 12px; }
+.find-buttons button.default { font-weight: bold; }
+#find-status { color: #666; font-size: 12px; min-height: 1.2em; white-space: pre-wrap; }
+#find-results {
+  list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; border: 1px solid var(--line);
+  font-family: Consolas, var(--ui-font); font-size: 12px;
+}
+#find-results li { padding: 2px 6px; cursor: default; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#find-results li:hover { background: #e8f0fe; }
+#find-results li.selected { background: #cbe8f6; }
+#find-step { background: #eef4fb; border: 1px solid #c8dcf0; border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+#find-step[hidden] { display: none; }
+#find-step-file { font-weight: bold; }
+#find-step-context { font-family: Consolas, var(--ui-font); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+
 /* 右クリックのメニュー・「ファイル」のメニュー */
 .md-menu {
   position: fixed; z-index: 100; min-width: 160px; padding: 4px 0;

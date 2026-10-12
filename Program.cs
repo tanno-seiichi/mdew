@@ -225,7 +225,241 @@ namespace mdew
                     SavePastedImage(root.GetProperty("id").GetInt32(), root.GetProperty("type").GetString(),
                         root.GetProperty("data").GetString());
                     break;
+                case "openFolder":
+                    OpenFolder(root.TryGetProperty("relPath", out JsonElement relElement) && JsonValueKind.String == relElement.ValueKind
+                        ? relElement.GetString() : null);
+                    break;
+                case "listDir":
+                    ListDirectory(root.GetProperty("path").GetString());
+                    break;
+                case "openPath":
+                    OpenPath(root.GetProperty("path").GetString());
+                    break;
+                case "readFolderFiles":
+                    ReadFolderFiles(root.GetProperty("reqId").GetInt32(), root.GetProperty("root").GetString());
+                    break;
+                case "saveAll":
+                    SaveAll(root.GetProperty("files"));
+                    break;
             }
+        }
+
+        // ===== フォルダビュー・検索と置換・すべて保存（web\js\folder.js・find.js、main.js 参照） =====
+
+        /// <summary>Markdown ファイルとして扱う拡張子（フォルダビューの一覧・フォルダ全体の検索の対象。mde と同じ）。</summary>
+        private static readonly string[] MARKDOWN_EXTENSIONS = { ".md", ".markdown" };
+
+        /// <summary>エクスプローラーと同じ並べ方（数字を数として比べる。「2」は「10」より前）で文字列を比べる。</summary>
+        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+        private static extern int StrCmpLogicalW(string a_x, string a_y);
+
+        /// <summary>Markdown ファイルか（拡張子が .md・.markdown。大文字・小文字は区別しない）。</summary>
+        /// <param name="a_path">ファイルのパス。</param>
+        /// <returns>Markdown ファイルなら true。</returns>
+        private static bool IsMarkdownFile(string a_path)
+        {
+            string ext = Path.GetExtension(a_path);
+            return Array.Exists(MARKDOWN_EXTENSIONS, e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>フォルダの直下のサブフォルダ（名前が「.」で始まるものは除く）と Markdown ファイルを、
+        /// それぞれエクスプローラーと同じ順に並べて返す（mde の FolderTreeManager と同じ）。
+        /// 読めないフォルダ（アクセスが拒否された等）は、読めた分だけを返す。</summary>
+        /// <param name="a_dir">フォルダのパス。</param>
+        /// <param name="a_dirs">サブフォルダのフルパスを受け取る。</param>
+        /// <param name="a_files">Markdown ファイルのフルパスを受け取る。</param>
+        private static void ListMarkdownEntries(string a_dir, out System.Collections.Generic.List<string> a_dirs,
+            out System.Collections.Generic.List<string> a_files)
+        {
+            a_dirs = new System.Collections.Generic.List<string>();
+            a_files = new System.Collections.Generic.List<string>();
+            try
+            {
+                foreach (string d in Directory.EnumerateDirectories(a_dir))
+                {
+                    if (!Path.GetFileName(d).StartsWith(".")) a_dirs.Add(d);
+                }
+                foreach (string f in Directory.EnumerateFiles(a_dir))
+                {
+                    if (IsMarkdownFile(f)) a_files.Add(f);
+                }
+            }
+            catch (Exception)
+            {
+                // 読めた分だけを返す
+            }
+            a_dirs.Sort((x, y) => StrCmpLogicalW(Path.GetFileName(x), Path.GetFileName(y)));
+            a_files.Sort((x, y) => StrCmpLogicalW(Path.GetFileName(x), Path.GetFileName(y)));
+        }
+
+        /// <summary>メニュー「ファイル」→「フォルダを開く...」。フォルダを選ぶダイアログを出し、選ばれたら
+        /// HTML 側に folderOpened を送ってから、そのフォルダのファイルを1つ開く（mde と同じく、今のファイルと
+        /// 同じ相対パスのファイルがあればそれを、無ければフォルダの直下の最初のファイル。どちらも無ければ新規の文書）。
+        /// 保存していない変更の確認は、HTML 側でダイアログを出す前に済ませている。</summary>
+        /// <param name="a_relPath">今のファイルの、今のフォルダからの相対パス（フォルダを開いていない・新規の文書は null）。</param>
+        private void OpenFolder(string a_relPath)
+        {
+            var dialog = new OpenFolderDialog { Title = "フォルダを開く" };
+            if (true != dialog.ShowDialog(this))
+            {
+                return;
+            }
+            OpenFolderPath(dialog.FolderName, a_relPath);
+        }
+
+        /// <summary>フォルダを開く（HTML 側に folderOpened を送ってから、そのフォルダのファイルを1つ開く）。
+        /// メニュー「フォルダを開く...」と、起動時引数でフォルダが指定された場合に使う。</summary>
+        /// <param name="a_folder">フォルダのパス。</param>
+        /// <param name="a_relPath">開きたいファイルの、フォルダからの相対パス（無ければ null。その場合や、そのファイルが
+        /// 無い場合は、フォルダの直下の最初のファイルを開く）。</param>
+        private void OpenFolderPath(string a_folder, string a_relPath)
+        {
+            string folder = a_folder.TrimEnd(Path.DirectorySeparatorChar);
+            if (folder.EndsWith(":")) folder += Path.DirectorySeparatorChar; // ドライブの直下（C:\）
+            string name = Path.GetFileName(folder);
+            Post(new { cmd = "folderOpened", root = folder, name = string.IsNullOrEmpty(name) ? folder : name });
+            string open = null;
+            if (!string.IsNullOrEmpty(a_relPath))
+            {
+                string candidate = Path.Combine(folder, a_relPath);
+                if (File.Exists(candidate)) open = candidate;
+            }
+            if (null == open)
+            {
+                ListMarkdownEntries(folder, out _, out var files);
+                open = 0 < files.Count ? files[0] : null;
+            }
+            if (null != open)
+            {
+                LoadFile(open);
+            }
+            else
+            {
+                ResetToNewDocument();
+            }
+        }
+
+        /// <summary>新規の文書（無題・空）にする。保存先・BOM・改行の設定も新規の文書と同じにする。</summary>
+        private void ResetToNewDocument()
+        {
+            m_currentPath = null;
+            m_hasBom = false;
+            m_useCrLf = true;
+            Post(new { cmd = "load", path = (string)null, name = "無題", docBase = (string)null, markdown = "" });
+        }
+
+        /// <summary>フォルダビューでフォルダを展開した時に、直下のサブフォルダと Markdown ファイルを返す（dirList を送る）。</summary>
+        /// <param name="a_dir">フォルダのパス。</param>
+        private void ListDirectory(string a_dir)
+        {
+            ListMarkdownEntries(a_dir, out var dirs, out var files);
+            Post(new { cmd = "dirList", path = a_dir, dirs, files });
+        }
+
+        /// <summary>フォルダビュー・検索結果から、パスを指定してファイルを開く。</summary>
+        /// <param name="a_path">ファイルのパス。</param>
+        private void OpenPath(string a_path)
+        {
+            if (!File.Exists(a_path))
+            {
+                Post(new { cmd = "error", message = $"ファイルが見つかりません。\n{a_path}" });
+                return;
+            }
+            LoadFile(a_path);
+        }
+
+        /// <summary>ファイルを読んで、BOM を取り除き、改行を LF にそろえた文字列を返す。</summary>
+        /// <param name="a_path">ファイルのパス。</param>
+        /// <returns>ファイルの内容。</returns>
+        private static string ReadMarkdownText(string a_path)
+        {
+            byte[] bytes = File.ReadAllBytes(a_path);
+            bool bom = bytes.Length >= 3 && 0xEF == bytes[0] && 0xBB == bytes[1] && 0xBF == bytes[2];
+            return new UTF8Encoding(false).GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0)).Replace("\r\n", "\n");
+        }
+
+        /// <summary>フォルダ全体の検索・置換用に、フォルダ以下のすべての Markdown ファイルの内容を返す
+        /// （folderFiles を送る）。並びはフォルダビューと同じ（各フォルダの中で、サブフォルダ、ファイルの順）。
+        /// 名前が「.」で始まるフォルダは、フォルダビューと同じく対象にしない。読めないファイルは飛ばす。</summary>
+        /// <param name="a_reqId">HTML 側が付けた要求の番号（そのまま返す）。</param>
+        /// <param name="a_root">フォルダのパス。</param>
+        private void ReadFolderFiles(int a_reqId, string a_root)
+        {
+            var result = new System.Collections.Generic.List<object>();
+            void Walk(string a_dir)
+            {
+                ListMarkdownEntries(a_dir, out var dirs, out var files);
+                foreach (string d in dirs) Walk(d);
+                foreach (string f in files)
+                {
+                    try
+                    {
+                        result.Add(new { path = f, text = ReadMarkdownText(f) });
+                    }
+                    catch (Exception)
+                    {
+                        // 読めないファイルは飛ばす
+                    }
+                }
+            }
+            Walk(a_root);
+            Post(new { cmd = "folderFiles", reqId = a_reqId, files = result });
+        }
+
+        /// <summary>メニュー「ファイル」→「すべて保存」。開いているファイル（current が true）は通常の保存と同じく
+        /// 保存し（saved を送る）、それ以外のファイル（フォルダ全体の置換・ファイルの切り替えで、保存せずに
+        /// 置いておいた内容）は、それぞれのファイルの BOM の有無・改行の種類に合わせて書き出す。
+        /// 終わったら、保存できたファイルと失敗したファイルを savedAll で知らせる。</summary>
+        /// <param name="a_files">保存するファイル（path・markdown・images・current）の配列。</param>
+        private void SaveAll(JsonElement a_files)
+        {
+            var saved = new System.Collections.Generic.List<string>();
+            var failed = new System.Collections.Generic.List<object>();
+            foreach (JsonElement f in a_files.EnumerateArray())
+            {
+                string path = f.GetProperty("path").GetString();
+                string markdown = f.GetProperty("markdown").GetString();
+                var images = new System.Collections.Generic.List<string>();
+                if (f.TryGetProperty("images", out JsonElement imagesElement) && JsonValueKind.Array == imagesElement.ValueKind)
+                {
+                    foreach (JsonElement item in imagesElement.EnumerateArray()) images.Add(item.GetString());
+                }
+                if (f.TryGetProperty("current", out JsonElement currentElement) && currentElement.GetBoolean())
+                {
+                    if (SaveFile(markdown, false, images, out string error)) saved.Add(path);
+                    else failed.Add(new { path, message = error });
+                    continue;
+                }
+                try
+                {
+                    WriteOtherFile(path, markdown);
+                    saved.Add(path);
+                }
+                catch (Exception ex)
+                {
+                    failed.Add(new { path, message = ex.Message });
+                }
+            }
+            Post(new { cmd = "savedAll", saved, failed });
+        }
+
+        /// <summary>開いていないファイルに内容を書き出す。BOM の有無・改行の種類は、今のファイルの内容に合わせる
+        /// （改行は CRLF が1つでもあれば CRLF。LoadFile と同じ判定）。貼り付けた画像は「&lt;ファイル名&gt;.images」へ移す。</summary>
+        /// <param name="a_path">ファイルのパス。</param>
+        /// <param name="a_markdown">書き出す内容（改行は LF）。</param>
+        private void WriteOtherFile(string a_path, string a_markdown)
+        {
+            bool bom = false;
+            bool crlf = true;
+            if (File.Exists(a_path))
+            {
+                byte[] bytes = File.ReadAllBytes(a_path);
+                bom = bytes.Length >= 3 && 0xEF == bytes[0] && 0xBB == bytes[1] && 0xBF == bytes[2];
+                crlf = new UTF8Encoding(false).GetString(bytes).Contains("\r\n");
+            }
+            string markdown = RelocateTempImages(a_markdown, a_path, new System.Collections.Generic.Dictionary<string, string>());
+            string text = crlf ? markdown.Replace("\r\n", "\n").Replace("\n", "\r\n") : markdown;
+            File.WriteAllText(a_path, text, new UTF8Encoding(bom));
         }
 
         /// <summary>「新規」で開いたウィンドウの位置・サイズを渡す起動時引数の名前。</summary>
@@ -365,9 +599,8 @@ namespace mdew
             }
             else if (Directory.Exists(path))
             {
-                // mde ではフォルダビューに読み込んで先頭のファイルを開く。フォルダビューの移植時に対応する。
-                MessageBox.Show(this, $"フォルダを指定しての起動には、まだ対応していません。\n{path}",
-                    Program.AppName, MessageBoxButton.OK, MessageBoxImage.Information);
+                // フォルダを指定して起動した場合は、フォルダビューに読み込んで、直下の最初のファイルを開く（mde と同じ）
+                OpenFolderPath(path, null);
             }
             else
             {
@@ -453,6 +686,21 @@ namespace mdew
         /// <param name="a_images">文書内の画像の参照先（HTML 側の collectImageSources が集めたもの）。</param>
         private void SaveFile(string a_markdown, bool a_saveAs, System.Collections.Generic.IReadOnlyList<string> a_images)
         {
+            if (!SaveFile(a_markdown, a_saveAs, a_images, out string error) && null != error)
+            {
+                Post(new { cmd = "error", message = $"保存できませんでした。\n{error}" });
+            }
+        }
+
+        /// <summary>ファイルに保存し、HTML 側に saved を送る（SaveFile と同じ。失敗しても error は送らず、理由を返す）。</summary>
+        /// <param name="a_markdown">保存する内容（改行は LF）。</param>
+        /// <param name="a_saveAs">名前を付けて保存か。</param>
+        /// <param name="a_images">文書内の画像の参照先。</param>
+        /// <param name="a_error">失敗した理由を受け取る（保存先を選ぶダイアログでキャンセルされた場合は null）。</param>
+        /// <returns>保存できたら true。</returns>
+        private bool SaveFile(string a_markdown, bool a_saveAs, System.Collections.Generic.IReadOnlyList<string> a_images, out string a_error)
+        {
+            a_error = null;
             string oldPath = m_currentPath;
             string path = m_currentPath;
             if (a_saveAs || string.IsNullOrEmpty(path))
@@ -464,7 +712,7 @@ namespace mdew
                 };
                 if (true != sfd.ShowDialog(this))
                 {
-                    return;
+                    return false;
                 }
                 path = sfd.FileName;
             }
@@ -480,10 +728,12 @@ namespace mdew
                 m_currentPath = path;
                 string docBase = SetDocumentFolder(path);
                 Post(new { cmd = "saved", path, name = Path.GetFileName(path), docBase, markdown, replacements });
+                return true;
             }
             catch (Exception ex)
             {
-                Post(new { cmd = "error", message = $"保存できませんでした。\n{ex.Message}" });
+                a_error = ex.Message;
+                return false;
             }
         }
 

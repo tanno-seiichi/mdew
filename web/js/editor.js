@@ -482,6 +482,31 @@ export class Editor {
   }
 
   /**
+   * 指定した範囲を文字に置き換える（検索と置換の 1件ずつ置換用。find.js 参照）。
+   * 「元に戻す」で1回で戻せるよう、まとめて1つの操作にする。後ろの範囲から順に置き換える（前の範囲の位置がずれないように）。
+   * @param {{range: Range, text: string}[]} a_items 置き換える範囲と文字（文書の順）
+   * @returns {Range|null} 最初の範囲を置き換えた文字の直後の位置（次の箇所を探す基準に使う）
+   */
+  replaceRanges(a_items) {
+    if (!a_items.length) return null;
+    this.checkpoint('edit');
+    let after = null;
+    for (let i = a_items.length - 1; i >= 0; i--) {
+      const { range, text } = a_items[i];
+      range.deleteContents();
+      const node = document.createTextNode(text);
+      range.insertNode(node);
+      if (0 === i) {
+        after = document.createRange();
+        after.setStartAfter(node);
+        after.collapse(true);
+      }
+    }
+    this.changed();
+    return after;
+  }
+
+  /**
    * コードブロックの最後で改行した後に、カーソルのある新しい行が画面に出るようにする。
    * 末尾の改行の後ろは画面上の行にならず、そこに打った文字が前の行に付いてしまうため、目印の改行を
    * もう1つ後ろに置く（保存時に1つだけ取り除く。markdown.js の serializeBlock 参照）。

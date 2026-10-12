@@ -3,12 +3,18 @@
 // ホストとのメッセージ（JSON）:
 //   web → host : {cmd:'ready'} / {cmd:'open'} / {cmd:'save', markdown, saveAs, images} /
 //                {cmd:'dirty', value} / {cmd:'newWindow'} / {cmd:'pasteImage', id, type, data} / {cmd:'imeOn'} /
-//                {cmd:'openUrl', url} / {cmd:'openRelative', path} / {cmd:'devTools'} / {cmd:'about'}
+//                {cmd:'openUrl', url} / {cmd:'openRelative', path} / {cmd:'devTools'} / {cmd:'about'} /
+//                {cmd:'openFolder', relPath} / {cmd:'listDir', path} / {cmd:'openPath', path} /
+//                {cmd:'readFolderFiles', reqId, root} / {cmd:'saveAll', files:[{path, markdown, images, current}]}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
-//                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug}
+//                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug} /
+//                {cmd:'folderOpened', root, name} / {cmd:'dirList', path, dirs, files} /
+//                {cmd:'folderFiles', reqId, files:[{path, text}]} / {cmd:'savedAll', saved, failed:[{path, message}]}
 import { Editor, showMenu } from './editor.js';
 import { setJoinSoftBreaks } from './markdown.js';
+import { FolderView, pathKey } from './folder.js';
+import { FindPanel } from './find.js';
 
 /** ホスト（WebView2）とのやり取りの窓口。ブラウザ単体で開いた場合（動作確認用）は null。 */
 const host = window.chrome?.webview ?? null;
@@ -27,6 +33,7 @@ const state = {
   dirty: false, // 保存していない変更があるか
   pendingSave: null, // 保存要求中の内容（保存完了時に元テキストとして取り込み直す）
   nextImageId: 1, // 貼り付けた画像の番号（ホストからの imagePasted と対応させる）
+  sourceMode: false, // ソースモード（Markdown のソースを直接編集する）か。終了時には覚えない
 };
 
 /**
@@ -42,6 +49,7 @@ const editor = new Editor($('doc'), {
   onChange: () => {
     setDirty(true);
     scheduleOutline();
+    findPanel.onDocumentChanged();
   },
   onOpenLink: (a_href) => openLink(a_href),
   onError: (a_message) => alert(a_message),
@@ -81,7 +89,61 @@ function setDirty(a_value) {
   state.dirty = a_value;
   $('status-dirty').textContent = a_value ? '● 未保存' : '';
   updateTitle();
-  send({ cmd: 'dirty', value: a_value });
+  syncDirtyToHost();
+  folderView.refresh();
+}
+
+// ---- 保存していない、開いていないファイルの内容（フォルダビューでの切り替え・フォルダ全体の置換）----
+/**
+ * フォルダを開いている時に、保存せずに別のファイルへ切り替えたファイルや、フォルダ全体の置換で書き換えたファイルの
+ * 内容（mde と同じく、保存するまでファイルには書き出さない）。パスのキー（pathKey）→ {path, markdown, images}。
+ * そのファイルを開き直すと、この内容を表示する（未保存のまま）。「すべて保存」で書き出す。
+ */
+const pendingEdits = new Map();
+
+/** 保存していない変更が、どこかにあるか（開いているファイル・開いていないファイル）。 */
+function hasUnsaved() {
+  return state.dirty || pendingEdits.size > 0;
+}
+/** 閉じる時の確認のため、保存していない変更があるかをホストに知らせる。 */
+function syncDirtyToHost() {
+  send({ cmd: 'dirty', value: hasUnsaved() });
+}
+/**
+ * そのファイルに保存していない変更があるか（フォルダビューの「* 」に使う）。
+ * @param {string} a_path ファイルのパス
+ * @returns {boolean}
+ */
+function isPathDirty(a_path) {
+  if (state.path && pathKey(a_path) === pathKey(state.path)) return state.dirty;
+  return pendingEdits.has(pathKey(a_path));
+}
+/**
+ * 開いていないファイルの内容を、保存せずに置いておく（フォルダ全体の置換）。
+ * @param {string} a_path ファイルのパス
+ * @param {string} a_markdown 内容
+ */
+function setPendingText(a_path, a_markdown) {
+  const old = pendingEdits.get(pathKey(a_path));
+  pendingEdits.set(pathKey(a_path), { path: a_path, markdown: a_markdown, images: old ? old.images : [] });
+  folderView.refresh();
+  syncDirtyToHost();
+}
+/**
+ * 開いているファイルの内容を置き換える（すべて置換）。表示の位置は保ち、未保存にする。元に戻すの履歴は消える。
+ * @param {string} a_markdown 置き換える内容
+ */
+function replaceCurrentMarkdown(a_markdown) {
+  if (state.sourceMode) {
+    // ソースモード：入力欄の内容を置き換える（入力欄の「元に戻す」で戻せる）
+    replaceSourceRange(0, sourceArea.value.length, a_markdown);
+    return;
+  }
+  const wrap = $('editor-wrap');
+  const scrollTop = wrap.scrollTop;
+  loadDocument(a_markdown);
+  setDirty(true);
+  wrap.scrollTop = scrollTop;
 }
 
 /** ウィンドウのタイトルを更新する（未保存なら先頭に「* 」）。 */
@@ -98,18 +160,47 @@ function scheduleOutline() {
   clearTimeout(outlineTimer);
   outlineTimer = setTimeout(buildOutline, 300);
 }
+/** アウトラインの項目（見出しの要素 → li）。検索で見つかった見出しに印を付けるのに使う。 */
+let outlineItems = new Map();
+/** 検索で見つかった箇所を含む見出しと、今の箇所の見出し（find.js の updateOutlineMarks が決める）。 */
+let outlineMarks = { hits: new Set(), current: null };
+
+/**
+ * アウトラインの見出しに、検索の印を付ける。
+ * @param {Set<Element>} a_hits 見つかった箇所を含む見出し（黄色）
+ * @param {Element|null} a_current 今の箇所の見出し（選択した色）
+ */
+function setOutlineMarks(a_hits, a_current) {
+  outlineMarks = { hits: a_hits, current: a_current };
+  applyOutlineMarks();
+}
+/** アウトラインの各項目に、検索の印を付け直す。 */
+function applyOutlineMarks() {
+  for (const [h, li] of outlineItems) {
+    li.classList.toggle('search-hit', outlineMarks.hits.has(h));
+    li.classList.toggle('search-current', outlineMarks.current === h);
+  }
+}
+
 /** アウトラインを作り直す（見出しをクリックすると、その見出しへ移動する）。 */
 function buildOutline() {
+  if (state.sourceMode) {
+    buildSourceOutline();
+    return;
+  }
   const list = $('outline-list');
   list.replaceChildren();
+  outlineItems = new Map();
   for (const h of editor.headings()) {
     const li = document.createElement('li');
+    outlineItems.set(h, li);
     li.textContent = h.textContent.replace(/\u200b/g, '').trim() || '(無題)';
     li.title = li.textContent; // 幅が足りずに見切れた時も、マウスを乗せれば全体が見えるように
     li.className = `lv${h.tagName.substring(1)}`;
     li.addEventListener('click', () => h.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     list.appendChild(li);
   }
+  applyOutlineMarks();
 }
 
 // ---- リンクを開く ------------------------------------------------------------
@@ -131,7 +222,7 @@ function openLink(a_href) {
   }
   const path = a_href.split('#')[0];
   if (!/^[a-z][a-z0-9+.-]*:/i.test(a_href) && /\.(md|markdown)$/i.test(path)) {
-    if (state.dirty && !confirm('保存されていない変更があります。破棄してリンク先のファイルを開きますか？')) return;
+    if (mustConfirmDiscard() && !confirm('保存されていない変更があります。破棄してリンク先のファイルを開きますか？')) return;
     send({ cmd: 'openRelative', path: decodeURIComponentSafe(path) });
     return;
   }
@@ -219,29 +310,488 @@ try {
 } catch {
   // 読み込めなければ既定の幅のまま
 }
-// 境界をドラッグしている間、アウトラインの幅を変える（離した時に保存する）
-$('splitter').addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  const splitter = e.currentTarget;
-  splitter.setPointerCapture(e.pointerId);
-  const startX = e.clientX;
-  const startWidth = $('outline').getBoundingClientRect().width;
-  let width = startWidth;
-  document.body.classList.add('resizing');
-  const onMove = (ev) => { width = setOutlineWidth(startWidth + ev.clientX - startX); };
-  const onUp = () => {
-    splitter.removeEventListener('pointermove', onMove);
-    splitter.removeEventListener('pointerup', onUp);
-    splitter.removeEventListener('pointercancel', onUp);
-    document.body.classList.remove('resizing');
-    saveOutlineWidth(width);
-  };
-  splitter.addEventListener('pointermove', onMove);
-  splitter.addEventListener('pointerup', onUp);
-  splitter.addEventListener('pointercancel', onUp);
+/**
+ * ペインの境界をドラッグして、ペインの幅を変えられるようにする（離した時に保存する。ダブルクリックで既定の幅に戻す）。
+ * @param {HTMLElement} a_splitter 境界の要素
+ * @param {HTMLElement} a_pane 幅を変えるペイン（境界の左側）
+ * @param {(px: number) => number} a_setWidth 幅を設定する関数（実際に設定した幅を返す）
+ * @param {(px: number) => void} a_saveWidth 幅を保存する関数
+ * @param {number} a_defaultWidth 既定の幅
+ */
+function setupSplitter(a_splitter, a_pane, a_setWidth, a_saveWidth, a_defaultWidth) {
+  a_splitter.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    a_splitter.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startWidth = a_pane.getBoundingClientRect().width;
+    let width = startWidth;
+    document.body.classList.add('resizing');
+    const onMove = (ev) => { width = a_setWidth(startWidth + ev.clientX - startX); };
+    const onUp = () => {
+      a_splitter.removeEventListener('pointermove', onMove);
+      a_splitter.removeEventListener('pointerup', onUp);
+      a_splitter.removeEventListener('pointercancel', onUp);
+      document.body.classList.remove('resizing');
+      a_saveWidth(width);
+    };
+    a_splitter.addEventListener('pointermove', onMove);
+    a_splitter.addEventListener('pointerup', onUp);
+    a_splitter.addEventListener('pointercancel', onUp);
+  });
+  a_splitter.addEventListener('dblclick', () => a_saveWidth(a_setWidth(a_defaultWidth)));
+}
+setupSplitter($('splitter'), $('outline'), setOutlineWidth, saveOutlineWidth, OUTLINE_DEFAULT_WIDTH);
+
+// ---- フォルダビューの幅（アウトラインと同じ。既定は mde と同じ 200px）-----------------
+const FOLDER_WIDTH_KEY = 'folderWidth';
+const FOLDER_DEFAULT_WIDTH = 200;
+/**
+ * フォルダビューの幅を変える（120px 以上、画面の幅の 6 割以下に収める）。
+ * @param {number} a_px 幅（px）
+ * @returns {number} 実際に設定した幅
+ */
+function setFolderWidth(a_px) {
+  const width = Math.round(Math.max(120, Math.min(a_px, window.innerWidth * 0.6)));
+  $('folder').style.width = `${width}px`;
+  return width;
+}
+/**
+ * フォルダビューの幅を、次回起動時のために保存する。
+ * @param {number} a_px 幅（px）
+ */
+function saveFolderWidth(a_px) {
+  try {
+    localStorage.setItem(FOLDER_WIDTH_KEY, String(a_px));
+  } catch {
+    // 保存できなくても動作には影響しない
+  }
+}
+try {
+  const saved = Number(localStorage.getItem(FOLDER_WIDTH_KEY));
+  if (saved > 0) setFolderWidth(saved);
+} catch {
+  // 読み込めなければ既定の幅のまま
+}
+setupSplitter($('folder-splitter'), $('folder'), setFolderWidth, saveFolderWidth, FOLDER_DEFAULT_WIDTH);
+
+// ---- フォルダビュー（メニュー「ファイル」→「フォルダを開く...」で開いた時だけ表示する。folder.js）----
+/** フォルダの中身の一覧を待っている要求（パスのキー → 結果を受け取る関数の配列）。 */
+const dirListWaiters = new Map();
+/**
+ * フォルダの中身（サブフォルダ・Markdown ファイル）をホストに問い合わせる。
+ * @param {string} a_path フォルダのパス
+ * @returns {Promise<{dirs: string[], files: string[]}>}
+ */
+function listDir(a_path) {
+  if (!host) return Promise.resolve({ dirs: [], files: [] });
+  return new Promise((resolve) => {
+    const key = pathKey(a_path);
+    if (!dirListWaiters.has(key)) dirListWaiters.set(key, []);
+    dirListWaiters.get(key).push(resolve);
+    send({ cmd: 'listDir', path: a_path });
+  });
+}
+const folderView = new FolderView($('folder-tree'), {
+  onOpenFile: (a_path) => openFile(a_path),
+  listDir,
+  isDirty: isPathDirty,
 });
-// 境界をダブルクリックすると既定の幅に戻す
-$('splitter').addEventListener('dblclick', () => saveOutlineWidth(setOutlineWidth(OUTLINE_DEFAULT_WIDTH)));
+$('folder-reopen').addEventListener('mousedown', (e) => e.preventDefault());
+$('folder-reopen').addEventListener('click', () => doOpenFolder());
+
+/**
+ * ファイルを切り替える前に、今の文書の変更を破棄してよいか確認が要るか。フォルダを開いている時は、保存していない
+ * 変更は破棄せずに置いておく（mde と同じ）ので、確認は要らない（ただし新規の文書は置いておけないので確認する）。
+ * @returns {boolean}
+ */
+function mustConfirmDiscard() {
+  return state.dirty && (!state.path || !folderView.isOpen);
+}
+
+/** ファイルを開くのを待っている要求（{key, resolve}。開いたら true、開けなかったら false を渡す）。 */
+let openWaiter = null;
+/**
+ * パスを指定してファイルを開く（フォルダビュー・検索結果から）。今のファイルの保存していない変更は置いておく。
+ * @param {string} a_path ファイルのパス
+ * @returns {Promise<boolean>} 開けたら true
+ */
+function openFile(a_path) {
+  if (state.path && pathKey(a_path) === pathKey(state.path)) return Promise.resolve(true);
+  if (mustConfirmDiscard() && !confirm('保存されていない変更があります。破棄して別のファイルを開きますか？')) {
+    return Promise.resolve(false);
+  }
+  if (!host) return Promise.resolve(false);
+  if (openWaiter) openWaiter.resolve(false);
+  return new Promise((resolve) => {
+    openWaiter = { key: pathKey(a_path), resolve };
+    send({ cmd: 'openPath', path: a_path });
+  });
+}
+
+/** メニュー「ファイル」→「フォルダを開く...」：保存していない変更があれば確認してから、フォルダを選ぶダイアログを出してもらう。 */
+function doOpenFolder() {
+  if (hasUnsaved() && !confirm('保存されていない変更があります。破棄して別のフォルダを開きますか？')) return;
+  send({ cmd: 'openFolder', relPath: folderView.relativePath(state.path) });
+}
+
+/** フォルダ全体の検索の内容を待っている要求（番号 → 結果を受け取る関数）。 */
+const folderFilesWaiters = new Map();
+let nextFolderReqId = 1;
+/**
+ * フォルダ以下のすべての Markdown ファイルの今の内容を得る（開いているファイルは画面の内容、保存せずに置いてある
+ * ファイルはその内容、それ以外はファイルの内容）。
+ * @returns {Promise<{path: string, text: string}[]>}
+ */
+function folderFiles() {
+  if (!host || !folderView.isOpen) return Promise.resolve([]);
+  const reqId = nextFolderReqId++;
+  return new Promise((resolve) => {
+    folderFilesWaiters.set(reqId, resolve);
+    send({ cmd: 'readFolderFiles', reqId, root: folderView.rootPath });
+  }).then((a_files) => {
+    const currentKey = state.path ? pathKey(state.path) : null;
+    const currentText = currentKey ? currentMarkdown() : null;
+    return a_files.map((f) => {
+      const key = pathKey(f.path);
+      if (key === currentKey) return { path: f.path, text: currentText };
+      const p = pendingEdits.get(key);
+      return p ? { path: f.path, text: p.markdown } : f;
+    });
+  });
+}
+
+/** メニュー「ファイル」→「すべて保存」：開いているファイルと、保存せずに置いてあるファイルをすべて保存する。 */
+function doSaveAll() {
+  const files = [];
+  if (state.path && state.dirty) {
+    if (state.sourceMode) {
+      state.pendingSave = null;
+      files.push({ path: state.path, markdown: sourceArea.value, images: imageSourcesIn(sourceArea.value), current: true });
+    } else {
+      const result = editor.serialize();
+      state.pendingSave = result;
+      files.push({ path: state.path, markdown: result.text, images: editor.collectImageSources(), current: true });
+    }
+  }
+  for (const p of pendingEdits.values()) files.push({ path: p.path, markdown: p.markdown, images: p.images || [] });
+  // 保存するものが無ければ何もしない（mde と同じ。新規の文書は対象外。「保存」で保存する）
+  if (!files.length) return;
+  if (!confirm('編集中のすべてのファイルを保存します。よろしいですか？')) {
+    state.pendingSave = null;
+    return;
+  }
+  send({ cmd: 'saveAll', files });
+}
+
+// ---- ソースモード（Markdown のソースを直接編集する。mde と同じ。メニュー「表示」→「ソースモード」）----
+// 入力欄（textarea）で Markdown のソースをそのまま編集する。切り替えた時は、カーソルと表示の位置を、
+// 同じ段落などのまとまりに合わせる（mde と同じく、まとまり単位のおおよその位置）。
+// 入力欄の後ろに、同じ大きさ・同じ文字の配置の要素（#source-backdrop）を重ね、検索で見つかった箇所の色と、
+// 行の位置を測るのに使う（入力欄の中の文字には色を付けられないため）。
+const sourceArea = $('source');
+const sourceBackdrop = $('source-backdrop');
+/** ソースモードに切り替えた時（・読み込んだ時・保存した時）の入力欄の内容。変わっていなければ、戻る時に読み直さない。 */
+let sourceOriginal = '';
+/** ソースモード中に「段落中の改行」を切り替えた等で、戻る時に読み直しが要るか。 */
+let sourceNeedsReload = false;
+/** 後ろの要素の内容が、入力欄と合っていないか（入力するたびに作り直さず、使う時に作り直す）。 */
+let sourceBackdropStale = true;
+/** 検索で見つかった箇所（{start, end} の配列）と、今の箇所。 */
+let sourceMarks = { matches: [], current: null };
+/** ソースモードに切り替えた時の、各まとまりのソースの中の位置（変更せずに戻った時に使う）。 */
+let sourcePositions = [];
+
+/**
+ * 開いているファイルの今の内容（Markdown）。ソースモードなら入力欄の内容。
+ * @returns {string}
+ */
+function currentMarkdown() {
+  return state.sourceMode ? sourceArea.value : editor.serialize().text;
+}
+
+/**
+ * Markdown の中の画像の参照先を集める（ソースモードで保存する時に、名前を付けて保存で画像をコピーするため。
+ * Markdown モードの editor.collectImageSources と同じ役目）。
+ * @param {string} a_text Markdown
+ * @returns {string[]}
+ */
+function imageSourcesIn(a_text) {
+  const result = [];
+  for (const m of a_text.matchAll(/!\[[^\]]*\]\(\s*(?:<([^>]*)>|([^\s)]+))/g)) result.push(m[1] || m[2]);
+  for (const m of a_text.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)) result.push(m[1]);
+  return result;
+}
+
+/**
+ * 入力欄の内容を置き換える（ファイルを読み込んだ時等。カーソルは先頭）。
+ * @param {string} a_text 内容
+ */
+function setSourceText(a_text) {
+  sourceArea.value = a_text;
+  sourceOriginal = a_text;
+  sourceNeedsReload = false;
+  sourceMarks = { matches: [], current: null };
+  sourceBackdropStale = true;
+  sourceArea.setSelectionRange(0, 0);
+  sourceArea.scrollTop = 0;
+}
+
+/**
+ * HTML の特別な文字を文字参照にする（後ろの要素の内容を作る用）。
+ * @param {string} a_text 文字列
+ * @returns {string}
+ */
+function escapeSourceHtml(a_text) {
+  return a_text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** 後ろの要素の内容を、入力欄の内容と検索の色に合わせて作り直す（1行を1つの span にする。行の位置を測るため）。 */
+function renderSourceBackdrop() {
+  const text = sourceArea.value;
+  const { matches, current } = sourceMarks;
+  const lines = text.split('\n');
+  let html = '';
+  let pos = 0;
+  let mi = 0;
+  for (let li = 0; li < lines.length; li++) {
+    const ls = pos;
+    const le = pos + lines[li].length;
+    while (mi < matches.length && matches[mi].end <= ls) mi++;
+    let inner = '';
+    let p = ls;
+    for (let k = mi; k < matches.length && matches[k].start < le; k++) {
+      const s = Math.max(matches[k].start, ls);
+      const e = Math.min(matches[k].end, le);
+      if (e <= s) continue;
+      const cls = current && matches[k].start === current.start ? ' class="current"' : '';
+      inner += `${escapeSourceHtml(text.slice(p, s))}<mark${cls}>${escapeSourceHtml(text.slice(s, e))}</mark>`;
+      p = e;
+    }
+    inner += escapeSourceHtml(text.slice(p, le));
+    // 最後の行の後ろに空白を置く（末尾が改行の場合も、入力欄と同じ高さになるように）
+    html += `<span data-s="${ls}">${inner}${li < lines.length - 1 ? '\n' : ' '}</span>`;
+    pos = le + 1;
+  }
+  sourceBackdrop.innerHTML = html;
+  sourceBackdrop.scrollTop = sourceArea.scrollTop;
+  sourceBackdropStale = false;
+}
+
+/** 後ろの要素が古ければ作り直す。 */
+function ensureSourceBackdrop() {
+  if (sourceBackdropStale) renderSourceBackdrop();
+}
+
+/**
+ * 検索で見つかった箇所に色を付ける（find.js の SourceTarget から呼ぶ）。
+ * @param {{start: number, end: number}[]} a_matches 見つかった箇所
+ * @param {{start: number, end: number}|null} a_current 今の箇所
+ */
+function highlightSource(a_matches, a_current) {
+  sourceMarks = { matches: a_matches, current: a_current };
+  renderSourceBackdrop();
+}
+
+/**
+ * ソースの位置を含む行の、入力欄の中での上端の位置（px。スクロールしていない時の位置）。
+ * @param {number} a_pos ソースの中の文字の位置
+ * @returns {number}
+ */
+function sourceLineTop(a_pos) {
+  ensureSourceBackdrop();
+  let top = 0;
+  for (const span of sourceBackdrop.children) {
+    if (Number(span.dataset.s) > a_pos) break;
+    top = span.offsetTop;
+  }
+  return top;
+}
+
+/**
+ * 入力欄の一番上に見えている行の、ソースの中の位置。
+ * @returns {number}
+ */
+function sourceTopVisibleOffset() {
+  ensureSourceBackdrop();
+  const pad = parseFloat(getComputedStyle(sourceArea).paddingTop) || 0;
+  for (const span of sourceBackdrop.children) {
+    if (span.offsetTop + span.offsetHeight > sourceArea.scrollTop + pad) return Number(span.dataset.s);
+  }
+  return 0;
+}
+
+/**
+ * ソースの位置の行を、入力欄の一番上に表示する。
+ * @param {number} a_pos ソースの中の文字の位置
+ */
+function scrollSourceToTop(a_pos) {
+  const pad = parseFloat(getComputedStyle(sourceArea).paddingTop) || 0;
+  sourceArea.scrollTop = Math.max(0, sourceLineTop(a_pos) - pad);
+  sourceBackdrop.scrollTop = sourceArea.scrollTop;
+}
+
+/**
+ * ソースの位置が見えていなければ、見える位置（上から 3 分の 1 あたり）までスクロールする（検索で使う）。
+ * @param {number} a_pos ソースの中の文字の位置
+ */
+function revealSourcePosition(a_pos) {
+  const top = sourceLineTop(a_pos);
+  const view = sourceArea.clientHeight;
+  if (top < sourceArea.scrollTop + 20 || top > sourceArea.scrollTop + view - 60) {
+    sourceArea.scrollTop = Math.max(0, top - view / 3);
+  }
+  sourceBackdrop.scrollTop = sourceArea.scrollTop;
+}
+
+/**
+ * 入力欄の一部を置き換える。入力欄の「元に戻す」（Ctrl+Z）で戻せるよう、入力欄への入力として行う
+ * （置換で使う。フォーカスは元の場所に戻す）。
+ * @param {number} a_start 置き換える範囲の始まり
+ * @param {number} a_end 置き換える範囲の終わり
+ * @param {string} a_text 置き換える文字
+ */
+function replaceSourceRange(a_start, a_end, a_text) {
+  const active = document.activeElement;
+  sourceArea.focus();
+  sourceArea.setSelectionRange(a_start, a_end);
+  if (a_text) document.execCommand('insertText', false, a_text);
+  else document.execCommand('delete');
+  if (active && active !== sourceArea) active.focus();
+}
+
+// 入力欄を編集したら未保存にし、アウトラインと検索の色を作り直す。スクロールは後ろの要素にも合わせる
+sourceArea.addEventListener('input', () => {
+  setDirty(true);
+  sourceMarks = { matches: [], current: null };
+  sourceBackdropStale = true;
+  sourceBackdrop.textContent = '';
+  scheduleOutline();
+  findPanel.onDocumentChanged();
+});
+sourceArea.addEventListener('scroll', () => { sourceBackdrop.scrollTop = sourceArea.scrollTop; });
+
+/** ソースモードのアウトライン：ソースの見出しの行（# で始まる行。コードブロックの中は除く）の一覧。 */
+function buildSourceOutline() {
+  const list = $('outline-list');
+  list.replaceChildren();
+  outlineItems = new Map();
+  const text = sourceArea.value;
+  let pos = 0;
+  let fence = null;
+  for (const line of text.split('\n')) {
+    const start = pos;
+    pos += line.length + 1;
+    const f = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (f) {
+      if (!fence) fence = f[1][0];
+      else if (f[1][0] === fence) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const h = line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/);
+    if (!h) continue;
+    const li = document.createElement('li');
+    li.textContent = (h[2] || '').trim() || '(無題)';
+    li.title = li.textContent;
+    li.className = `lv${h[1].length}`;
+    li.addEventListener('click', () => {
+      sourceArea.focus();
+      sourceArea.setSelectionRange(start, start);
+      scrollSourceToTop(start);
+    });
+    list.appendChild(li);
+  }
+}
+
+/**
+ * まとまりの位置の一覧から、ソースの位置を含むまとまりの番号を探す。
+ * @param {{start: number}[]} a_positions 各まとまりのソースの中の位置（文書の順）
+ * @param {number} a_offset ソースの中の位置
+ * @returns {number} まとまりの番号（無ければ -1）
+ */
+function blockIndexAt(a_positions, a_offset) {
+  let found = -1;
+  for (let i = 0; i < a_positions.length; i++) {
+    if (a_positions[i].start <= a_offset) found = i;
+    else break;
+  }
+  return found;
+}
+
+/**
+ * ソースモードと Markdown モードを切り替える。未保存の印はそのまま残す。
+ *  - ソースモードへ：今の内容を Markdown にして入力欄に表示する。カーソルのあったまとまりの先頭にカーソルを置き、
+ *    一番上に見えていたまとまりを、入力欄でも一番上に表示する。
+ *  - Markdown モードへ：入力欄の内容が変わっていれば、その内容で読み直す（変わっていなければ、元に戻すの履歴も
+ *    そのまま残る）。カーソルと表示の位置は、入力欄で見ていた行のまとまりに合わせる。
+ * @param {boolean} a_on ソースモードにするか
+ */
+function setSourceMode(a_on) {
+  if (state.sourceMode === a_on) return;
+  const wrap = $('editor-wrap');
+  if (a_on) {
+    const result = editor.serialize();
+    const blocks = [...$('doc').children];
+    const caret = editor.getCaret();
+    const caretEl = caret ? blocks[caret.index] : null;
+    const caretPos = result.positions.find((p) => p.el === caretEl);
+    const wrapTop = wrap.getBoundingClientRect().top;
+    const topPos = result.positions.find((p) => p.el.getBoundingClientRect().bottom > wrapTop + 1);
+    state.sourceMode = true;
+    document.body.classList.add('source-mode');
+    setSourceText(result.text);
+    sourcePositions = result.positions;
+    sourceArea.focus();
+    const at = caretPos ? caretPos.start : 0;
+    sourceArea.setSelectionRange(at, at);
+    if (topPos) scrollSourceToTop(topPos.start);
+    buildOutline();
+  } else {
+    const text = sourceArea.value;
+    const caretOffset = sourceArea.selectionStart;
+    const topOffset = sourceTopVisibleOffset();
+    const changed = text !== sourceOriginal || sourceNeedsReload;
+    state.sourceMode = false;
+    document.body.classList.remove('source-mode');
+    let positions = sourcePositions;
+    if (changed) {
+      const wasDirty = state.dirty;
+      editor.load(text);
+      if (wasDirty) setDirty(true);
+      positions = editor.serialize().positions;
+    }
+    buildOutline();
+    const blocks = positions.map((p) => p.el);
+    const top = blockIndexAt(positions, topOffset);
+    if (top >= 0) blocks[top].scrollIntoView({ block: 'start' });
+    else wrap.scrollTop = 0;
+    editor.focus();
+    const ci = blockIndexAt(positions, caretOffset);
+    if (ci >= 0) editor.setCaret({ index: [...$('doc').children].indexOf(blocks[ci]), offset: 0 });
+  }
+  findPanel.onDocumentLoaded();
+}
+
+// ---- 検索と置換（find.js）---------------------------------------------------------
+const findPanel = new FindPanel({
+  editor,
+  doc: $('doc'),
+  folder: folderView,
+  currentPath: () => state.path,
+  folderFiles,
+  openFile,
+  replaceCurrentMarkdown,
+  setPendingText,
+  setOutlineMarks,
+  currentMarkdown,
+  source: {
+    active: () => state.sourceMode,
+    area: sourceArea,
+    highlight: (a_matches, a_current) => highlightSource(a_matches, a_current),
+    reveal: (a_pos) => revealSourcePosition(a_pos),
+    replaceRange: (a_start, a_end, a_text) => replaceSourceRange(a_start, a_end, a_text),
+  },
+});
 
 // ---- コマンド ---------------------------------------------------------------
 /**
@@ -251,6 +801,13 @@ $('splitter').addEventListener('dblclick', () => saveOutlineWidth(setOutlineWidt
 function loadDocument(a_markdown) {
   editor.load(a_markdown);
   setDirty(false);
+  if (state.sourceMode) {
+    // ソースモードでは、入力欄にも同じ内容を表示する
+    setSourceText(a_markdown);
+    buildOutline();
+    sourceArea.focus();
+    return;
+  }
   buildOutline();
   editor.focus();
 }
@@ -260,7 +817,7 @@ function doNew() {
 }
 /** 開く：未保存の変更があれば確認してから、ホストにファイルを開くダイアログを出してもらう。 */
 function doOpen() {
-  if (state.dirty && !confirm('保存されていない変更があります。破棄して別のファイルを開きますか？')) return;
+  if (mustConfirmDiscard() && !confirm('保存されていない変更があります。破棄して別のファイルを開きますか？')) return;
   send({ cmd: 'open' });
 }
 /**
@@ -269,6 +826,13 @@ function doOpen() {
  * @param {boolean} a_saveAs 名前を付けて保存か
  */
 function doSave(a_saveAs) {
+  if (state.sourceMode) {
+    // ソースモード：入力欄の内容をそのまま保存する（saved を受け取った時に、編集部分も読み直す）
+    state.pendingSave = null;
+    const text = sourceArea.value;
+    send({ cmd: 'save', markdown: text, saveAs: !!a_saveAs || !state.path, images: imageSourcesIn(text) });
+    return;
+  }
   const result = editor.serialize();
   state.pendingSave = result;
   send({ cmd: 'save', markdown: result.text, saveAs: !!a_saveAs || !state.path, images: editor.collectImageSources() });
@@ -280,10 +844,15 @@ const commands = {
   open: doOpen,
   save: () => doSave(false),
   saveAs: () => doSave(true),
+  openFolder: doOpenFolder,
+  saveAll: doSaveAll,
+  find: () => findPanel.open(),
+  toggleFolder: () => document.body.classList.toggle('no-folderpane'),
   toggleOutline: () => togglePane('no-outline'),
   toggleStatusbar: () => togglePane('no-statusbar'),
   softBreakSource: () => setSoftBreakMode(false),
   softBreakJoin: () => setSoftBreakMode(true),
+  toggleSource: () => setSourceMode(!state.sourceMode),
   about: () => send({ cmd: 'about' }), // バージョン情報のウィンドウ（ホスト側の dialog\AboutWindow）
 };
 document.querySelectorAll('#menubar button[data-cmd]').forEach((b) =>
@@ -345,6 +914,12 @@ function setSoftBreakMode(a_join) {
   } catch {
     // 保存できなくても動作には影響しない（次回は既定の表示になるだけ）
   }
+  if (state.sourceMode) {
+    // ソースモード中は設定だけを変え、Markdown モードに戻る時に反映する（mde と同じ）
+    setJoinSoftBreaks(a_join);
+    sourceNeedsReload = true;
+    return;
+  }
   const markdown = editor.serialize().text;
   const wasDirty = state.dirty;
   const wrap = $('editor-wrap');
@@ -377,17 +952,28 @@ const MENUS = {
     items: () => [
       { label: '新規', key: 'Ctrl+N', cmd: 'new' },
       { label: '開く', key: 'Ctrl+O', cmd: 'open' },
+      { label: 'フォルダを開く...', cmd: 'openFolder' },
       null,
       { label: '保存', key: 'Ctrl+S', cmd: 'save' },
       { label: '名前を付けて保存', key: 'Ctrl+Shift+S', cmd: 'saveAs' },
+      { label: 'すべて保存', cmd: 'saveAll' },
     ],
   },
   view: {
     button: $('menu-view'),
     key: 'v',
     items: () => [
+      // フォルダビューは「フォルダを開く...」で開いた時だけ表示できる
+      {
+        label: 'フォルダを表示',
+        checked: folderView.isOpen && isPaneVisible('no-folderpane'),
+        disabled: !folderView.isOpen,
+        cmd: 'toggleFolder',
+      },
       { label: 'アウトラインを表示', checked: isPaneVisible('no-outline'), cmd: 'toggleOutline' },
       { label: 'ステータスバーを表示', checked: isPaneVisible('no-statusbar'), cmd: 'toggleStatusbar' },
+      null,
+      { label: 'ソースモード', checked: state.sourceMode, cmd: 'toggleSource' },
       null,
       { label: '段落中の改行', heading: true },
       { label: 'ソースの通りに改行する', checked: !joinSoftBreaks, cmd: 'softBreakSource' },
@@ -459,24 +1045,119 @@ window.addEventListener('keydown', (e) => {
   if ('s' === k) { e.preventDefault(); doSave(e.shiftKey); }
   else if ('o' === k) { e.preventDefault(); doOpen(); }
   else if ('n' === k) { e.preventDefault(); doNew(); }
+  else if ('f' === k && !e.shiftKey) { e.preventDefault(); findPanel.open(); }
 });
+
+/**
+ * ファイルを開くのを待っている要求があれば、結果を渡す。
+ * @param {string|null} a_path 開いたファイルのパス
+ * @param {boolean} a_ok 開けたか
+ */
+function resolveOpenWaiter(a_path, a_ok) {
+  if (openWaiter && a_path && pathKey(a_path) === openWaiter.key) {
+    openWaiter.resolve(a_ok);
+    openWaiter = null;
+  }
+}
+
+/**
+ * 保存したファイルをフォルダビューで選択する。名前を付けて保存でフォルダの中に新しいファイルができた場合は、
+ * そのフォルダの一覧を読み込み直す。
+ * @param {string} a_path 保存したファイルのパス
+ */
+async function revealSavedFile(a_path) {
+  if (folderView.isOpen && folderView.contains(a_path) && !folderView.has(a_path)) {
+    await folderView.reload(a_path.replace(/[\\/][^\\/]*$/, ''));
+  }
+  folderView.setCurrent(a_path);
+}
 
 // ---- ホストからのメッセージ --------------------------------------------------
 if (host) {
   host.addEventListener('message', (ev) => {
     const msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
     if ('load' === msg.cmd) {
-      // ファイルを開いた（起動時の引数・開くダイアログ・相対パスのリンク）
+      // ファイルを開いた（起動時の引数・開くダイアログ・相対パスのリンク・フォルダビュー・検索結果）
+      const samePath = !!state.path && !!msg.path && pathKey(state.path) === pathKey(msg.path);
+      if (samePath && state.dirty && !confirm('保存されていない変更を破棄して、ファイルを読み直しますか？')) {
+        resolveOpenWaiter(msg.path, true);
+        return;
+      }
+      // フォルダを開いている時は、今のファイルの保存していない変更を置いておく（そのファイルを開き直すと戻る）
+      if (!samePath && state.path && state.dirty && folderView.isOpen) {
+        const text = currentMarkdown();
+        pendingEdits.set(pathKey(state.path), {
+          path: state.path, markdown: text, images: state.sourceMode ? imageSourcesIn(text) : editor.collectImageSources(),
+        });
+      }
       setDocumentBase(msg.docBase);
       state.path = msg.path;
       state.name = msg.name;
-      loadDocument(msg.markdown);
+      const pending = msg.path ? pendingEdits.get(pathKey(msg.path)) : null;
+      if (pending) {
+        // 保存せずに置いてあった内容を表示する（未保存のまま。mde は未保存の印が消えるが、消さない）
+        pendingEdits.delete(pathKey(msg.path));
+        loadDocument(pending.markdown);
+        setDirty(true);
+      } else {
+        loadDocument(msg.markdown);
+      }
       updateTitle();
+      syncDirtyToHost();
+      folderView.setCurrent(msg.path);
+      findPanel.onDocumentLoaded();
+      resolveOpenWaiter(msg.path, true);
+    } else if ('folderOpened' === msg.cmd) {
+      // フォルダを開いた（保存していない変更は、確認の上で破棄する。この後、開くファイルの load が届く）
+      pendingEdits.clear();
+      setDirty(false);
+      syncDirtyToHost();
+      document.body.classList.add('folder-open');
+      document.body.classList.remove('no-folderpane');
+      $('folder-title').title = msg.root;
+      folderView.open(msg.root, msg.name);
+      findPanel.updateScope();
+    } else if ('dirList' === msg.cmd) {
+      const waiters = dirListWaiters.get(pathKey(msg.path)) || [];
+      dirListWaiters.delete(pathKey(msg.path));
+      for (const resolve of waiters) resolve({ dirs: msg.dirs || [], files: msg.files || [] });
+    } else if ('folderFiles' === msg.cmd) {
+      const resolve = folderFilesWaiters.get(msg.reqId);
+      folderFilesWaiters.delete(msg.reqId);
+      if (resolve) resolve(msg.files || []);
+    } else if ('savedAll' === msg.cmd) {
+      // すべて保存が終わった（開いているファイルの分は、先に saved が届いている）
+      for (const p of msg.saved || []) pendingEdits.delete(pathKey(p));
+      folderView.refresh();
+      syncDirtyToHost();
+      let text = `${(msg.saved || []).length} 個のファイルを保存しました。`;
+      if (msg.failed && msg.failed.length) {
+        text += `\n\n保存に失敗したファイル:\n${msg.failed.map((f) => `${f.path} (${f.message})`).join('\n')}`;
+      }
+      alert(text);
     } else if ('saved' === msg.cmd) {
       // 保存が終わった（名前を付けて保存の場合は、新しいパス・画像の基準の場所になる）
       if (msg.docBase) setDocumentBase(msg.docBase);
       state.path = msg.path;
       state.name = msg.name;
+      if (state.sourceMode) {
+        // ソースモード：保存した内容（貼り付けた画像の参照先を書き換えた後のもの）で、入力欄と編集部分をそろえる
+        if (sourceArea.value !== msg.markdown) {
+          const caret = Math.min(sourceArea.selectionStart, msg.markdown.length);
+          sourceArea.value = msg.markdown;
+          sourceArea.setSelectionRange(caret, caret);
+        }
+        editor.load(msg.markdown);
+        sourceOriginal = msg.markdown;
+        sourceNeedsReload = false;
+        sourceBackdropStale = true;
+        state.pendingSave = null;
+        pendingEdits.delete(pathKey(msg.path));
+        setDirty(false);
+        updateTitle();
+        revealSavedFile(msg.path);
+        return;
+      }
       let result = state.pendingSave;
       if (msg.replacements && Object.keys(msg.replacements).length) {
         // 貼り付けた画像を保存先へ移した等で画像の参照先が変わった場合は、画面の画像も書き換えて、
@@ -486,13 +1167,19 @@ if (host) {
       }
       if (result) editor.markSaved(result);
       state.pendingSave = null;
+      pendingEdits.delete(pathKey(msg.path));
       setDirty(false);
       updateTitle();
+      revealSavedFile(msg.path);
     } else if ('imagePasted' === msg.cmd) {
       // 貼り付けた画像を、ホストが一時フォルダに保存し終えた
       editor.insertImage(msg.url, msg.alt);
     } else if ('error' === msg.cmd) {
       alert(msg.message);
+      if (openWaiter) {
+        openWaiter.resolve(false);
+        openWaiter = null;
+      }
     } else if ('focus' === msg.cmd) {
       // 起動直後：ウィンドウが表示されたら、すぐに書き始められるよう編集領域にカーソルを置く
       editor.focus();
@@ -552,7 +1239,7 @@ function startStallMonitor() {
 // ブラウザ単体で開いて自動テストする時に使う（load：文書を読み込む、get：保存する内容を得る）。
 window.__mdeTest = {
   load: (a_md) => loadDocument(a_md),
-  get: () => editor.serialize().text,
+  get: () => currentMarkdown(),
   editor,
 };
 
