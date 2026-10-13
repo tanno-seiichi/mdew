@@ -70,6 +70,11 @@ namespace mdew
             Content = m_webView;
             Loaded += async (s, e) => await InitializeWebViewAsync();
             Closing += OnClosing;
+            // ほかのウィンドウで開いた・保存したファイルも、最近使ったファイルに出るよう、手前に来るたびに読み直す
+            Activated += (s, e) =>
+            {
+                if (null != m_webView.CoreWebView2) PostRecentFiles(AppSettings.Load());
+            };
             // 前回終了時のウィンドウの位置・サイズ・最大化状態を復元する（RestoreWindowPlacement 参照）。
             // 初回起動時（まだ保存されていない時）は画面の中央に表示する。
             if (null == m_settings.Window && null == m_startupBounds)
@@ -171,7 +176,9 @@ namespace mdew
             {
                 case "ready":
                     // 画面側の設定（Debug ビルドの時は、ステータスバーに停止・入力遅延の回数を表示する）
-                    Post(new { cmd = "init", debug = Program.IsDebugBuild });
+                    // 貼り付けた画像の一時フォルダ（他のアプリへコピーする時に、画像のファイルの場所にする）
+                    Post(new { cmd = "init", debug = Program.IsDebugBuild, tempDir = m_tempImageDir });
+                    PostRecentFiles(AppSettings.Load());
                     OpenStartupPath();
                     // すぐに書き始められるよう、編集領域にキーボードの入力先を移す
                     m_webView.Focus();
@@ -241,6 +248,429 @@ namespace mdew
                 case "saveAll":
                     SaveAll(root.GetProperty("files"));
                     break;
+                case "openFind":
+                    ShowFindWindow();
+                    break;
+                case "findUpdate":
+                    m_findWindow?.ApplyUpdate(root);
+                    break;
+                case "openImage":
+                    OpenImage(root.GetProperty("src").GetString());
+                    break;
+                case "exportPdf":
+                    _ = ExportPdfAsync(root.GetProperty("name").GetString());
+                    break;
+                case "pdfMargin":
+                    ShowPdfMarginDialog();
+                    break;
+                case "copyHtml":
+                    CopyHtml(root.GetProperty("html").GetString(), root.GetProperty("text").GetString());
+                    break;
+                case "importImages":
+                    ImportImages(root.GetProperty("id").GetInt32(), root.GetProperty("srcs"));
+                    break;
+                case "openRecent":
+                    OpenRecentFile(root.GetProperty("path").GetString());
+                    break;
+                case "clearRecent":
+                    ClearRecentFiles();
+                    break;
+                case "close":
+                    // メニュー「閉じる」（Ctrl+W）：このウィンドウを閉じる（保存していない変更があれば OnClosing で確認する）
+                    Close();
+                    break;
+            }
+        }
+
+        // ===== Excel 等とのコピー・貼り付け（web\js\clipboard.js） =====
+
+        /// <summary>Excel 等へ貼り付ける画像を置く一時フォルダ（mde と同じく、コピーのたびに古いものを消す）。</summary>
+        private static readonly string s_clipboardTempDir = Path.Combine(Path.GetTempPath(), Program.AssemblyName, "clipboard_images");
+
+        /// <summary>「Excel用にコピー」「表をコピー」：HTML（CF_HTML）と文字をクリップボードに書き込む（mde の
+        /// ClipboardHtmlBuilder・TableEditor と同じ形）。画面側（WebView2）が書き込むと、HTML に元のページの場所
+        /// （https://app.mdew/…）が付き、Excel がインターネット上のページとして扱って PC の中の画像を読み込まないため、
+        /// ここで書き込む。画像（file:///…）は、mde と同じく一時フォルダへコピーしてから参照させる。</summary>
+        /// <param name="a_html">HTML の断片（表）。</param>
+        /// <param name="a_text">文字（改行は LF）。</param>
+        private void CopyHtml(string a_html, string a_text)
+        {
+            string html = System.Text.RegularExpressions.Regex.Replace(a_html, "(<img\\b[^>]*?\\bsrc=\")([^\"]*)(\")",
+                m => m.Groups[1].Value + System.Net.WebUtility.HtmlEncode(CopyImageForClipboard(System.Net.WebUtility.HtmlDecode(m.Groups[2].Value))) + m.Groups[3].Value,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var data = new DataObject();
+            data.SetData(DataFormats.UnicodeText, (a_text ?? string.Empty).Replace("\r\n", "\n").Replace("\n", "\r\n"));
+            data.SetData(DataFormats.Html, BuildHtmlClipboardFragment(html));
+            // ほかのアプリがクリップボードを開いている時は失敗するので、少し待って何回か試す
+            for (int i = 0; ; i++)
+            {
+                try
+                {
+                    Clipboard.SetDataObject(data, true);
+                    return;
+                }
+                catch (Exception ex) when (i < 5)
+                {
+                    ErrorLog.Write("クリップボードに書き込めませんでした（再試行）", ex);
+                    System.Threading.Thread.Sleep(50);
+                }
+            }
+        }
+
+        /// <summary>Excel 等に貼り付ける画像を一時フォルダへコピーし、その file:/// の URL を返す（mde の
+        /// ImageManager.WriteTempFileForClipboard と同じ）。ファイル名は英数字だけにし、同じ画像を何か所に
+        /// 貼っても Excel が1つにまとめないよう、ファイルの末尾に無害なバイトを足して中身を毎回変える（BMP を除く）。
+        /// file:/// 以外（http 等）・コピーできない場合は、そのまま返す。</summary>
+        /// <param name="a_url">画像の参照先。</param>
+        /// <returns>一時フォルダの画像の URL。</returns>
+        private static string CopyImageForClipboard(string a_url)
+        {
+            try
+            {
+                if (!Uri.TryCreate(a_url, UriKind.Absolute, out Uri uri) || !uri.IsFile || !File.Exists(uri.LocalPath))
+                {
+                    return a_url;
+                }
+                Directory.CreateDirectory(s_clipboardTempDir);
+                DateTime cutoff = DateTime.Now.AddMinutes(-10);
+                foreach (string old in Directory.GetFiles(s_clipboardTempDir))
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTime(old) < cutoff) File.Delete(old);
+                    }
+                    catch (Exception)
+                    {
+                        // 使用中等で消せないファイルは、次の機会に消す
+                    }
+                }
+                string ext = Path.GetExtension(uri.LocalPath).ToLowerInvariant();
+                string dest = Path.Combine(s_clipboardTempDir, Guid.NewGuid().ToString("N") + ext);
+                File.Copy(uri.LocalPath, dest, true);
+                if (".bmp" != ext)
+                {
+                    using var stream = new FileStream(dest, FileMode.Append, FileAccess.Write);
+                    stream.Write(Guid.NewGuid().ToByteArray());
+                }
+                return new Uri(dest).AbsoluteUri;
+            }
+            catch (Exception)
+            {
+                return a_url;
+            }
+        }
+
+        /// <summary>HTML の断片を、クリップボードの CF_HTML の形（位置の見出しと &lt;html&gt;&lt;body&gt; で囲んだもの）にする
+        /// （mde の TableEditor.BuildHtmlClipboardFragment と同じ。元のページの場所 SourceURL は付けない）。</summary>
+        /// <param name="a_fragment">HTML の断片。</param>
+        /// <returns>CF_HTML の文字列。</returns>
+        private static string BuildHtmlClipboardFragment(string a_fragment)
+        {
+            const string HTML_PREFIX = "<html><body><!--StartFragment-->";
+            const string HTML_SUFFIX = "<!--EndFragment--></body></html>";
+            const string HEADER_TEMPLATE = "Version:0.9\r\nStartHTML:{0:0000000000}\r\nEndHTML:{1:0000000000}\r\n" +
+                "StartFragment:{2:0000000000}\r\nEndFragment:{3:0000000000}\r\n";
+            int startHtml = Encoding.UTF8.GetByteCount(string.Format(HEADER_TEMPLATE, 0, 0, 0, 0));
+            int startFragment = startHtml + Encoding.UTF8.GetByteCount(HTML_PREFIX);
+            int endFragment = startFragment + Encoding.UTF8.GetByteCount(a_fragment);
+            int endHtml = endFragment + Encoding.UTF8.GetByteCount(HTML_SUFFIX);
+            return string.Format(HEADER_TEMPLATE, startHtml, endHtml, startFragment, endFragment) + HTML_PREFIX + a_fragment + HTML_SUFFIX;
+        }
+
+        /// <summary>他のアプリが置いた画像のファイル（Excel でコピーした範囲の画像の一時ファイル等。file:///…）を、
+        /// 貼り付けた画像の一時フォルダへコピーする（保存する時に「&lt;ファイル名&gt;.images」へ移る）。
+        /// Excel の一時ファイルは後で消されるため、貼り付けた時点でコピーしておく。結果は imagesImported で返す。</summary>
+        /// <param name="a_id">HTML 側が付けた要求の番号（そのまま返す）。</param>
+        /// <param name="a_srcs">画像の参照先の配列。</param>
+        private void ImportImages(int a_id, JsonElement a_srcs)
+        {
+            var urls = new System.Collections.Generic.List<string>();
+            foreach (JsonElement item in a_srcs.EnumerateArray())
+            {
+                string url = null;
+                try
+                {
+                    string src = item.GetString();
+                    if (Uri.TryCreate(src, UriKind.Absolute, out Uri uri) && uri.IsFile && File.Exists(uri.LocalPath) &&
+                        s_imageTypes.ContainsKey(Path.GetExtension(uri.LocalPath)))
+                    {
+                        Directory.CreateDirectory(m_tempImageDir);
+                        string ext = Path.GetExtension(uri.LocalPath).ToLowerInvariant();
+                        string fileName = GenerateSequentialFileName(m_tempImageDir, PASTED_IMAGE_BASE_NAME, ext);
+                        File.Copy(uri.LocalPath, Path.Combine(m_tempImageDir, fileName));
+                        url = $"https://{TMP_HOST}/{Uri.EscapeDataString(fileName)}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ErrorLog.Write("貼り付けた画像をコピーできませんでした", ex);
+                }
+                urls.Add(url);
+            }
+            Post(new { cmd = "imagesImported", id = a_id, urls });
+        }
+
+        // ===== 最近使ったファイル（メニュー「ファイル」→「最近使ったファイル」。mde と同じ） =====
+
+        /// <summary>最近使ったファイルとして覚えておく数（mde と同じ）。</summary>
+        private const int MAX_RECENT_FILES = 10;
+
+        /// <summary>最近使ったファイルの一覧を HTML 側へ送る（recentFiles。メニューを開いた時に表示する）。</summary>
+        /// <param name="a_settings">設定（一覧を持つもの）。</param>
+        private void PostRecentFiles(AppSettings a_settings)
+        {
+            Post(new { cmd = "recentFiles", files = a_settings.RecentFiles });
+        }
+
+        /// <summary>開いた・保存したファイルを、最近使ったファイルの先頭に加える（既にあれば先頭へ移す。
+        /// 多すぎる分は古いものから消す）。一覧は設定ファイルに置き、ほかのウィンドウとも同じものを使う。</summary>
+        /// <param name="a_path">ファイルのパス。</param>
+        private void AddRecentFile(string a_path)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(a_path);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            var settings = AppSettings.Load();
+            settings.RecentFiles.RemoveAll(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase));
+            settings.RecentFiles.Insert(0, full);
+            if (settings.RecentFiles.Count > MAX_RECENT_FILES)
+            {
+                settings.RecentFiles.RemoveRange(MAX_RECENT_FILES, settings.RecentFiles.Count - MAX_RECENT_FILES);
+            }
+            settings.Save();
+            PostRecentFiles(settings);
+        }
+
+        /// <summary>最近使ったファイルを開く。ファイルが無い（移動・削除された）場合は、そのことを知らせて一覧から消す（mde と同じ）。
+        /// 保存していない変更の確認は、HTML 側で済ませている。</summary>
+        /// <param name="a_path">ファイルのパス。</param>
+        private void OpenRecentFile(string a_path)
+        {
+            if (File.Exists(a_path))
+            {
+                LoadFile(a_path);
+                return;
+            }
+            var settings = AppSettings.Load();
+            settings.RecentFiles.RemoveAll(p => string.Equals(p, a_path, StringComparison.OrdinalIgnoreCase));
+            settings.Save();
+            PostRecentFiles(settings);
+            Post(new { cmd = "error", message = $"ファイルが見つかりませんでした。\n{a_path}" });
+        }
+
+        /// <summary>「履歴をクリア」：最近使ったファイルの一覧を空にする。</summary>
+        private void ClearRecentFiles()
+        {
+            var settings = AppSettings.Load();
+            settings.RecentFiles.Clear();
+            settings.Save();
+            PostRecentFiles(settings);
+        }
+
+        // ===== 画像を開く（web\js\editor.js の画像のダブルクリック・右クリックの「画像を開く」） =====
+
+        /// <summary>画像を既定のアプリで開く（mde と同じ）。http・https の画像はブラウザで開く。
+        /// それ以外は、貼り付けた画像（一時フォルダ）・file:///・絶対パス・開いているファイルのフォルダからの相対パスとして
+        /// ファイルを探す。誤ってプログラム等を実行しないよう、画像の拡張子のファイルだけを開く。</summary>
+        /// <param name="a_src">画像の参照先（文書に書かれたまま。貼り付けた画像は https://tmp.mdew/…）。</param>
+        private void OpenImage(string a_src)
+        {
+            string src = (a_src ?? string.Empty).Trim();
+            if (Uri.TryCreate(src, UriKind.Absolute, out Uri uri) && ("http" == uri.Scheme || "https" == uri.Scheme) &&
+                !string.Equals(uri.Host, TMP_HOST, StringComparison.OrdinalIgnoreCase))
+            {
+                OpenUrl(src);
+                return;
+            }
+            string path = ResolveImagePath(src);
+            if (null == path || !File.Exists(path))
+            {
+                Post(new { cmd = "error", message = $"この画像は開けません（元のファイルが見つからないか、埋め込みの画像です）。\n{src}" });
+                return;
+            }
+            if (!s_imageTypes.ContainsKey(Path.GetExtension(path)))
+            {
+                Post(new { cmd = "error", message = $"画像のファイルではないため開けません。\n{path}" });
+                return;
+            }
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Post(new { cmd = "error", message = $"画像を開けませんでした。\n{path}\n{ex.Message}" });
+            }
+        }
+
+        /// <summary>画像の参照先を、ファイルのパスにする（ファイルではない参照先・解決できない場合は null）。</summary>
+        /// <param name="a_src">画像の参照先（文書に書かれたまま）。</param>
+        /// <returns>ファイルのフルパス（存在するかは確かめない）。</returns>
+        private string ResolveImagePath(string a_src)
+        {
+            try
+            {
+                if (a_src.StartsWith($"https://{TMP_HOST}/", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 貼り付けた画像（まだ保存していない。このウィンドウの一時フォルダ）
+                    string name = Path.GetFileName(Uri.UnescapeDataString(new Uri(a_src).AbsolutePath));
+                    return 0 < name.Length ? Path.Combine(m_tempImageDir, name) : null;
+                }
+                if (a_src.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new Uri(a_src).LocalPath;
+                }
+                if (a_src.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || a_src.StartsWith("//") ||
+                    (Uri.TryCreate(a_src, UriKind.Absolute, out Uri uri) && !uri.IsFile))
+                {
+                    return null;
+                }
+                string pathPart = a_src.Split('?', '#')[0].Replace('/', Path.DirectorySeparatorChar);
+                if (Path.IsPathRooted(pathPart) && pathPart.Length >= 2 && (':' == pathPart[1] || pathPart.StartsWith(@"\\")))
+                {
+                    return Path.GetFullPath(pathPart); // C:\dir\a.png・\\server\share\a.png
+                }
+                if (string.IsNullOrEmpty(m_docFolder))
+                {
+                    return null; // 保存していない文書の相対パス
+                }
+                string full = Path.GetFullPath(Path.Combine(m_docFolder, pathPart));
+                // %20 等で書かれていれば、元の文字に戻したパスも試す
+                return File.Exists(full) ? full : Path.GetFullPath(Path.Combine(m_docFolder, Uri.UnescapeDataString(pathPart)));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        // ===== PDF に書き出す（メニュー「ファイル」→「PDFに書き出し…」・「PDFの余白を設定…」） =====
+
+        /// <summary>PDF に書き出す。HTML 側が、書き出す内容を印刷用の要素（#print-doc）に表示してから exportPdf を送ってくる
+        /// （印刷用の見た目は web\app.css の @media print）。保存先を選ぶダイアログを出し、WebView2 の PrintToPdfAsync で
+        /// A4 縦・設定した余白で書き出して、書き出した PDF を既定のアプリで開く。終わったら pdfExported を送る。</summary>
+        /// <param name="a_name">文書の名前（PDF のファイル名の初期値に使う。「無題」等）。</param>
+        /// <returns>書き出しが終わるまでの非同期処理。</returns>
+        private async System.Threading.Tasks.Task ExportPdfAsync(string a_name)
+        {
+            bool ok = false;
+            try
+            {
+                string baseName = !string.IsNullOrEmpty(m_currentPath)
+                    ? Path.GetFileNameWithoutExtension(m_currentPath)
+                    : Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(a_name) ? "無題" : a_name);
+                var dialog = new SaveFileDialog
+                {
+                    Title = "PDFに書き出し",
+                    Filter = "PDF ファイル (*.pdf)|*.pdf",
+                    FileName = baseName + ".pdf",
+                    DefaultExt = ".pdf",
+                    AddExtension = true,
+                };
+                if (!string.IsNullOrEmpty(m_currentPath))
+                {
+                    dialog.InitialDirectory = Path.GetDirectoryName(m_currentPath);
+                }
+                if (true != dialog.ShowDialog(this))
+                {
+                    return;
+                }
+                var settings = AppSettings.Load(); // 他のウィンドウで余白を変えた場合も、最新の値を使う
+                var core = m_webView.CoreWebView2;
+                var print = core.Environment.CreatePrintSettings();
+                print.Orientation = CoreWebView2PrintOrientation.Portrait;
+                print.PageWidth = 8.27;   // A4（インチ）
+                print.PageHeight = 11.69;
+                print.MarginTop = settings.PdfMarginTop / 96.0;
+                print.MarginBottom = settings.PdfMarginBottom / 96.0;
+                print.MarginLeft = settings.PdfMarginLeft / 96.0;
+                print.MarginRight = settings.PdfMarginRight / 96.0;
+                print.ShouldPrintBackgrounds = true;
+                print.ShouldPrintHeaderAndFooter = false;
+                if (!await core.PrintToPdfAsync(dialog.FileName, print))
+                {
+                    Post(new { cmd = "error", message = $"PDFに書き出せませんでした（ファイルが他のアプリで開かれている等）。\n{dialog.FileName}" });
+                    return;
+                }
+                ok = true;
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dialog.FileName) { UseShellExecute = true });
+                }
+                catch (Exception)
+                {
+                    // PDF を開くアプリが無い場合等。書き出しはできている
+                }
+            }
+            catch (Exception ex)
+            {
+                ErrorLog.Write("PDFに書き出せませんでした", ex);
+                Post(new { cmd = "error", message = $"PDFに書き出せませんでした。\n{ex.Message}" });
+            }
+            finally
+            {
+                Post(new { cmd = "pdfExported", ok });
+            }
+        }
+
+        /// <summary>メニュー「PDFの余白を設定…」。設定した余白は、すぐに設定ファイルに保存する（次に書き出す時から使う）。</summary>
+        private void ShowPdfMarginDialog()
+        {
+            var settings = AppSettings.Load();
+            var marginDialog = new dialog.PdfMarginDialog(settings.PdfMarginTop, settings.PdfMarginBottom, settings.PdfMarginLeft,
+                settings.PdfMarginRight) { Owner = this };
+            if (true != marginDialog.ShowDialog())
+            {
+                return;
+            }
+            settings.PdfMarginTop = marginDialog.MarginTop;
+            settings.PdfMarginBottom = marginDialog.MarginBottom;
+            settings.PdfMarginLeft = marginDialog.MarginLeft;
+            settings.PdfMarginRight = marginDialog.MarginRight;
+            settings.Save();
+        }
+
+        // ===== 検索と置換のウィンドウ（dialog\FindReplaceWindow。処理は web\js\find.js） =====
+
+        /// <summary>検索と置換のウィンドウ（初めて開く時に作る。閉じても隠すだけなので、入力した内容は残る）。</summary>
+        private dialog.FindReplaceWindow m_findWindow;
+        /// <summary>フォルダを開いているか（検索の対象に「フォルダ全体」を選べるか）。</summary>
+        private bool m_folderOpen;
+
+        /// <summary>検索と置換のウィンドウを開く（開いていれば手前に出して、検索する文字列の入力欄に移る）。
+        /// メインのウィンドウの外へも動かせる。メインのウィンドウを閉じると一緒に閉じる。</summary>
+        private void ShowFindWindow()
+        {
+            if (null == m_findWindow)
+            {
+                m_findWindow = new dialog.FindReplaceWindow(SendFindCommand) { Owner = this };
+            }
+            m_findWindow.SetFolderAvailable(m_folderOpen);
+            m_findWindow.ShowAndFocus();
+        }
+
+        /// <summary>検索と置換のウィンドウでの操作を、入力された内容と一緒に HTML 側へ送る（findCommand）。</summary>
+        /// <param name="a_action">操作（prev・next・all・replaceAll・stepStart・stepDo・stepSkip・stepRest・stepEnd・openResult・close）。</param>
+        /// <param name="a_index">openResult の時、選ばれた結果の番号（それ以外は -1）。</param>
+        private void SendFindCommand(string a_action, int a_index)
+        {
+            var w = m_findWindow;
+            Post(new
+            {
+                cmd = "findCommand", action = a_action, query = w.Query, replacement = w.Replacement,
+                folder = w.FolderScope, matchCase = w.MatchCase, regex = w.UseRegex, index = a_index,
+            });
+            if ("close" == a_action)
+            {
+                // 閉じたら、編集領域にキーボードの入力先を戻す
+                Activate();
+                m_webView.Focus();
             }
         }
 
@@ -317,6 +747,8 @@ namespace mdew
             string folder = a_folder.TrimEnd(Path.DirectorySeparatorChar);
             if (folder.EndsWith(":")) folder += Path.DirectorySeparatorChar; // ドライブの直下（C:\）
             string name = Path.GetFileName(folder);
+            m_folderOpen = true;
+            m_findWindow?.SetFolderAvailable(true);
             Post(new { cmd = "folderOpened", root = folder, name = string.IsNullOrEmpty(name) ? folder : name });
             string open = null;
             if (!string.IsNullOrEmpty(a_relPath))
@@ -672,6 +1104,7 @@ namespace mdew
                 m_currentPath = a_path;
                 string docBase = SetDocumentFolder(a_path);
                 Post(new { cmd = "load", path = a_path, name = Path.GetFileName(a_path), docBase, markdown = text.Replace("\r\n", "\n") });
+                AddRecentFile(a_path);
             }
             catch (Exception ex)
             {
@@ -728,6 +1161,7 @@ namespace mdew
                 m_currentPath = path;
                 string docBase = SetDocumentFolder(path);
                 Post(new { cmd = "saved", path, name = Path.GetFileName(path), docBase, markdown, replacements });
+                AddRecentFile(path);
                 return true;
             }
             catch (Exception ex)
@@ -1096,6 +1530,11 @@ namespace mdew
                 }
                 m_closeConfirmed = true;
             }
+            if (null != m_findWindow)
+            {
+                m_findWindow.AllowClose = true;
+                m_findWindow.Close();
+            }
             SaveWindowPlacement();
         }
 
@@ -1154,11 +1593,13 @@ namespace mdew
             }
             // 画面の端へドラッグして半分の幅にした（スナップした）状態で終了した場合も、rcNormalPosition は
             // スナップする前の位置・サイズなので、次回はスナップ前の状態で開く。
+            // 他のウィンドウで変えた設定（PDF の余白等）を消さないよう、設定ファイルを読み直してから書き換える
             RECT r = wp.rcNormalPosition;
-            m_settings.Window = new WindowBounds { Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom };
-            m_settings.IsMaximized = SW_SHOWMAXIMIZED == wp.showCmd ||
+            var settings = AppSettings.Load();
+            settings.Window = new WindowBounds { Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom };
+            settings.IsMaximized = SW_SHOWMAXIMIZED == wp.showCmd ||
                 (SW_SHOWMINIMIZED == wp.showCmd && 0 != (wp.flags & WPF_RESTORETOMAXIMIZED));
-            m_settings.Save();
+            settings.Save();
         }
     }
 

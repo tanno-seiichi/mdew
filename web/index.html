@@ -9,8 +9,8 @@
 <body>
   <div id="app">
     <header id="menubar">
-      <!-- メニューの項目は main.js の MENUS（ファイル：新規・開く・保存・名前を付けて保存、
-           表示：アウトライン・ステータスバーの表示の切り替え） -->
+      <!-- メニューの項目は main.js の MENUS（ファイル：新規・開く・フォルダを開く・保存・PDFに書き出し等、
+           表示：フォルダ・アウトライン・ステータスバーの表示の切り替え、ソースモード、段落中の改行） -->
       <button id="menu-file" title="ファイル (Alt+F)">ファイル(F)</button>
       <button id="menu-view" title="表示 (Alt+V)">表示(V)</button>
       <button data-cmd="find" title="検索と置換 (Ctrl+F)">検索と置換</button>
@@ -42,40 +42,8 @@
       <span id="status-host"></span>
     </footer>
   </div>
-  <!-- 検索と置換（Ctrl+F・メニューバーの「検索と置換」。find.js） -->
-  <div id="find-panel" role="dialog" aria-label="検索と置換" hidden>
-    <div id="find-header"><span>検索と置換</span><button id="find-close" title="閉じる (Esc)">×</button></div>
-    <div class="find-body">
-      <label for="find-query">検索する文字列</label>
-      <input id="find-query" type="text" spellcheck="false" autocomplete="off" />
-      <details id="find-replace-box">
-        <summary>置換後の文字列</summary>
-        <input id="find-replacement" type="text" spellcheck="false" autocomplete="off" />
-      </details>
-      <div class="find-row"><span class="find-label">対象範囲</span>
-        <label><input type="radio" name="find-scope" id="find-scope-file" checked />現在のファイル</label>
-        <label><input type="radio" name="find-scope" id="find-scope-folder" />フォルダ全体（サブフォルダ含む）</label>
-      </div>
-      <div class="find-row">
-        <label><input type="checkbox" id="find-case" />大文字・小文字を区別する</label>
-        <label><input type="checkbox" id="find-regex" />正規表現を使用する</label>
-      </div>
-      <div class="find-buttons">
-        <button id="find-prev">前を検索</button><button id="find-next">次を検索</button><button id="find-all" class="default">すべて検索</button>
-        <button id="find-step-replace" hidden>1件ずつ置換…</button><button id="find-replace-all" hidden>すべて置換</button>
-      </div>
-      <div id="find-status"></div>
-      <ul id="find-results" hidden></ul>
-      <div id="find-step" hidden>
-        <div id="find-step-file"></div>
-        <div id="find-step-context"></div>
-        <div class="find-buttons">
-          <button id="find-step-do">置換</button><button id="find-step-skip">スキップ</button>
-          <button id="find-step-rest">残りをすべて置換</button><button id="find-step-end">終了</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- PDF に書き出す時だけ使う、印刷用の文書（main.js の doExportPdf。見た目は app.css の @media print） -->
+  <div id="print-doc"></div>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

@@ -37,7 +37,13 @@ const RE_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 const RE_HR = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 const RE_QUOTE = /^ {0,3}> ?/;
 const RE_LIST_ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/;
-const RE_HTML_BLOCK = /^ {0,3}(?:<\/?[a-zA-Z][a-zA-Z0-9-]*(?:[\s>/]|$)|<!--)/;
+const RE_HTML_BLOCK_START = /^ {0,3}(?:<\/?[a-zA-Z][a-zA-Z0-9-]*(?:[\s>/]|$)|<!--)/;
+/** 「<img ...>」で始まる行（HTML のブロックにせず、段落の中の画像として表示する。mde と同じ）。 */
+const RE_IMG_LINE = /^ {0,3}<img[\s/>]/i;
+/** HTML のブロックの始まりの行か（「<img ...>」で始まる行は除く）。RegExp と同じく test で使う。 */
+const RE_HTML_BLOCK = { test: (a_line) => RE_HTML_BLOCK_START.test(a_line) && !RE_IMG_LINE.test(a_line) };
+/** HTML の画像のタグ（<img src="..." alt="..." style="...">。mde と同じ形）。 */
+const RE_IMG_TAG = /^<img\s[^>]*?\/?>/i;
 const RE_LINK_DEF = /^ {0,3}\[[^\]]+\]:[ \t]*\S/;
 const RE_TABLE_DELIM = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
 const RE_SETEXT_1 = /^ {0,3}=+[ \t]*$/;
@@ -429,7 +435,7 @@ export function renderInline(a_text) {
       if (link) {
         const title = link.title ? ` title="${escapeHtml(link.title)}"` : '';
         if (isImage) {
-          out += `<img src="${escapeHtml(link.url)}" alt="${escapeHtml(unescapeMd(link.text))}"${title}>`;
+          out += `<img ${imageSrcAttrs(link.url)} alt="${escapeHtml(unescapeMd(link.text))}"${title}>`;
         } else {
           out += `<a href="${escapeHtml(link.url)}"${title}>${renderInline(link.text)}</a>`;
         }
@@ -437,10 +443,15 @@ export function renderInline(a_text) {
         continue;
       }
     }
-    // 山括弧の URL・メールアドレス、<br>、<u>…</u>
+    // 山括弧の URL・メールアドレス、<br>、<u>…</u>、<img ...>
     if ('<' === ch) {
       const rest = s.slice(i);
       let m;
+      if ((m = rest.match(RE_IMG_TAG))) {
+        out += renderImageTag(m[0]);
+        i += m[0].length;
+        continue;
+      }
       if ((m = rest.match(/^<((?:https?|ftp):\/\/[^\s<>]+)>/i)) || (m = rest.match(/^<(mailto:[^\s<>]+)>/i))) {
         out += `<a href="${escapeHtml(m[1])}" data-auto="1">${escapeHtml(m[1])}</a>`;
         i += m[0].length;
@@ -610,6 +621,82 @@ function unescapeMd(a_text) {
   return a_text.replace(/\\([!-/:-@[-`{-~])/g, '$1');
 }
 
+/**
+ * 画像の参照先を、img 要素の属性にする。C:\dir\a.png・C:/dir/a.png・file:///C:/dir/a.png のような
+ * Windows の絶対パスは、そのままでは「C:」が URL の種類と解釈されて読めないため、「./C:/dir/a.png」として
+ * 文書の基準（https://doc.mdew/<世代>/）から要求させる（ホストが絶対パスとして読む。Program.cs の
+ * ServeDocumentResource）。書かれたままの参照先は data-src に残し、保存時にはそれを使う（serializeInline）。
+ * @param {string} a_url 書かれた参照先
+ * @returns {string} 「src="..."」（絶対パスの時は「src="..." data-src="..."」）
+ */
+function imageSrcAttrs(a_url) {
+  let path = null;
+  if (/^[a-zA-Z]:[\\/]/.test(a_url)) {
+    path = a_url;
+  } else if (/^file:\/\/\/[a-zA-Z]:[\\/]/i.test(a_url)) {
+    try {
+      path = decodeURIComponent(a_url.slice(8));
+    } catch (err) {
+      path = a_url.slice(8);
+    }
+  }
+  if (null === path) return `src="${escapeHtml(a_url)}"`;
+  const src = `./${path.replace(/\\/g, '/').split('/').map((p) => encodeURIComponent(p).replace(/%3A/gi, ':')).join('/')}`;
+  return `src="${escapeHtml(src)}" data-src="${escapeHtml(a_url)}"`;
+}
+
+/**
+ * HTML のタグの属性の値を取り出す（「name="値"」「name='値'」「name=値」の形）。
+ * @param {string} a_tag タグの文字列
+ * @param {string} a_name 属性の名前
+ * @returns {string|null} 値（文字参照は戻したもの）。無ければ null
+ */
+function tagAttribute(a_tag, a_name) {
+  const m = a_tag.match(new RegExp(`\\s${a_name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>/]+))`, 'i'));
+  if (!m) return null;
+  const value = m[1] ?? m[2] ?? m[3];
+  const t = document.createElement('textarea');
+  t.innerHTML = value;
+  return t.value;
+}
+
+/** HTML の画像のタグの style のうち、表示に使うもの（大きさ・余白・配置。他は無視する）。 */
+const ALLOWED_IMAGE_STYLES = /^(?:width|height|max-width|max-height|min-width|min-height|margin(?:-[a-z]+)?|vertical-align|float|border(?:-[a-z]+)?|border-radius)$/;
+
+/**
+ * HTML の画像のタグ（<img src="..." alt="..." width="..." style="...">）を、画面の img 要素にする。
+ * 表示に使うのは src・alt・title・width・height と、style の大きさ等だけ。書かれたままのタグは data-html に
+ * 残し、保存時には（編集していなければ）そのまま書き出す（serializeInline）。
+ * @param {string} a_tag タグの文字列
+ * @returns {string} HTML
+ */
+function renderImageTag(a_tag) {
+  const src = tagAttribute(a_tag, 'src') || '';
+  let attrs = imageSrcAttrs(src);
+  attrs += ` alt="${escapeHtml(tagAttribute(a_tag, 'alt') || '')}"`;
+  const title = tagAttribute(a_tag, 'title');
+  if (title) attrs += ` title="${escapeHtml(title)}"`;
+  for (const name of ['width', 'height']) {
+    const v = tagAttribute(a_tag, name);
+    if (v && /^\d+(?:\.\d+)?%?$/.test(v.trim())) attrs += ` ${name}="${escapeHtml(v.trim())}"`;
+  }
+  const style = (tagAttribute(a_tag, 'style') || '').split(';').map((d) => d.trim()).filter((d) => {
+    const k = d.indexOf(':');
+    return k > 0 && ALLOWED_IMAGE_STYLES.test(d.slice(0, k).trim().toLowerCase()) && !/url\s*\(|expression/i.test(d);
+  }).join(';');
+  if (style) attrs += ` style="${escapeHtml(style)}"`;
+  return `<img ${attrs} data-html="${escapeHtml(a_tag)}">`;
+}
+
+/**
+ * 画面の img 要素の、書かれたままの参照先（imageSrcAttrs で data-src に残したもの。無ければ src 属性）。
+ * @param {Element} a_img img 要素
+ * @returns {string}
+ */
+export function imageSource(a_img) {
+  return a_img.getAttribute('data-src') || a_img.getAttribute('src') || '';
+}
+
 // ===== 画面の要素から Markdown を組み立てる =====
 
 /**
@@ -618,7 +705,7 @@ function unescapeMd(a_text) {
  * @param {string} a_text 画面の文字（テキストノードの内容）
  * @returns {string} Markdown に書ける文字列
  */
-function escapeText(a_text) {
+export function escapeText(a_text) {
   let t = a_text.replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
   t = t.replace(/\\(?=[!-/:-@[-`{-~])/g, '\\\\');
   t = t.replace(/[*`]/g, '\\$&');
@@ -693,7 +780,9 @@ export function serializeInline(a_el) {
         break;
       }
       case 'IMG':
-        out += `![${(node.getAttribute('alt') || '').replace(/[[\]]/g, '\\$&')}](${linkDestination(node.getAttribute('src') || '')}${titlePart(node.getAttribute('title'))})`;
+        // HTML のタグで書かれていた画像は、書かれたままのタグで書き出す
+        if (node.dataset.html) out += node.dataset.html;
+        else out += `![${(node.getAttribute('alt') || '').replace(/[[\]]/g, '\\$&')}](${linkDestination(imageSource(node))}${titlePart(node.getAttribute('title'))})`;
         break;
       case 'INPUT':
         break;

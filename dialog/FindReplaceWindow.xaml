@@ -1,0 +1,76 @@
+<!-- 検索と置換のウィンドウ（mde の findreplace\FindReplaceWindow と同じ見た目・項目）。
+     メインのウィンドウの外へも動かせる、閉じるまで編集もできるウィンドウ。検索・置換の処理は画面側（web\js\find.js）で行い、
+     このウィンドウは入力と結果の表示だけを受け持つ（MainWindow.ShowFindWindow・SendFindCommand 参照）。 -->
+<Window x:Class="mdew.dialog.FindReplaceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="検索と置換"
+        Width="550"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        FontFamily="Segoe UI, Yu Gothic UI"
+        FontSize="13"
+        Background="#FFFFFF"
+        PreviewKeyDown="FindReplaceWindowPreviewKeyDown">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="MinWidth" Value="86"/>
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="22,22,22,20">
+
+        <TextBlock Text="検索する文字列"/>
+        <TextBox x:Name="m_searchBox" Padding="6,4" Margin="0,4,0,12" FontFamily="Consolas, Meiryo"/>
+
+        <Expander x:Name="m_replaceExpander" Header="置換後の文字列" Margin="0,0,0,14"
+                  Expanded="ReplaceExpanderToggled" Collapsed="ReplaceExpanderToggled">
+            <TextBox x:Name="m_replaceBox" Padding="6,4" Margin="0,2,0,0" FontFamily="Consolas, Meiryo"/>
+        </Expander>
+
+        <TextBlock Text="対象範囲" Margin="0,0,0,6"/>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <RadioButton x:Name="m_scopeCurrentFile" Content="現在のファイル" GroupName="scope" IsChecked="True" VerticalAlignment="Center"/>
+            <RadioButton x:Name="m_scopeFolder" Content="フォルダ全体（サブフォルダ含む）" GroupName="scope" Margin="20,0,0,0" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+            <CheckBox x:Name="m_caseSensitiveBox" Content="大文字・小文字を区別する"/>
+            <CheckBox x:Name="m_useRegexBox" Content="正規表現を使用する" Margin="20,0,0,0"/>
+        </StackPanel>
+
+        <WrapPanel>
+            <Button Content="前を検索" Click="FindPreviousClick"/>
+            <Button Content="次を検索" Click="FindNextClick"/>
+            <Button Content="すべて検索" Click="FindAllClick" IsDefault="True"/>
+            <Button x:Name="m_stepReplaceButton" Content="1件ずつ置換…" Click="StepReplaceClick" Visibility="Collapsed"/>
+            <Button x:Name="m_replaceAllButton" Content="すべて置換" Click="ReplaceAllClick" Visibility="Collapsed"/>
+        </WrapPanel>
+
+        <TextBlock x:Name="m_statusText" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12" Foreground="#666666"/>
+
+        <ListBox x:Name="m_resultsList" Margin="0,8,0,0" MaxHeight="500" Visibility="Collapsed"
+                 MouseDoubleClick="ResultsListMouseDoubleClick" FontFamily="Consolas, Meiryo" FontSize="12"/>
+
+        <!-- 1件ずつ置換の途中に表示する欄 -->
+        <Border x:Name="m_stepPanel" Visibility="Collapsed" Margin="0,14,0,0" Padding="14"
+                Background="#EEF4FB" BorderBrush="#C8DCF0" BorderThickness="1" CornerRadius="8">
+            <StackPanel>
+                <TextBlock x:Name="m_stepFileText" FontSize="11" FontFamily="Consolas, Meiryo"
+                           Foreground="#0B62C4" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                <TextBlock x:Name="m_stepContextText" FontFamily="Consolas, Meiryo" FontSize="12" TextWrapping="Wrap"
+                           Foreground="#1C1C1C" Margin="0,0,0,12"/>
+                <WrapPanel>
+                    <Button Content="置換" MinWidth="80" Click="StepReplaceOneClick"/>
+                    <Button Content="スキップ" MinWidth="80" Click="StepSkipClick"/>
+                    <Button Content="残りをすべて置換" MinWidth="120" Click="StepReplaceRemainingClick"/>
+                    <Button Content="終了" MinWidth="70" Click="StepEndClick"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+    </StackPanel>
+</Window>

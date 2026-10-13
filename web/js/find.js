@@ -1,6 +1,9 @@
 // mdew：検索と置換（mde の「検索と置換」ウィンドウと同じ内容。Ctrl+F・メニューバーの「検索と置換」で開く）。
 //
-// 画面の右上に重ねて表示する、閉じるまで編集もできる小さなウィンドウ（パネル）。
+// ウィンドウ（入力欄・ボタン・結果の一覧）はホスト側の WPF のウィンドウ（dialog\FindReplaceWindow。mde と同じく
+// メインのウィンドウの外へも動かせる）で、ここは検索・置換の処理を受け持つ。ウィンドウのボタンが押されると、
+// ホストが {cmd:'findCommand', action, 検索条件} を送ってくるので handle で実行し、結果の表示は
+// {cmd:'findUpdate', ...} としてウィンドウへ返す（main.js の postToWindow）。
 //  - 対象範囲：「現在のファイル」か「フォルダ全体（サブフォルダ含む）」（フォルダを開いている時だけ選べる）。
 //  - 大文字・小文字を区別する／正規表現を使用する（置換後の文字列では $1 等の後方参照が使える）。
 //  - 前を検索・次を検索・すべて検索、（置換後の文字列を開いた時）1件ずつ置換…・すべて置換。
@@ -24,6 +27,23 @@ const CONTEXT_CHARS = 30;
 const HIGHLIGHT_MAX = 5000;
 /** 段落などのまとまり（この要素ごとに文字を探す）。 */
 const BLOCK_TAGS = /^(P|H[1-6]|LI|TD|TH|PRE|BLOCKQUOTE|UL|OL|TABLE|THEAD|TBODY|TR|HR|DIV|SECTION)$/;
+
+/** 今の箇所を選択しているかを確かめる関数（選択していない間は null）。 */
+let s_isCurrentSelected = null;
+
+/**
+ * 今の箇所を選択している間は、範囲選択の色（淡い青）を付けず、今の箇所の色（オレンジ。mde と同じ）が見えるようにする
+ * （範囲選択の色は、検索の色より上に塗られるため）。カーソルを動かす等で選択が変わったら、範囲選択の色に戻す。
+ * @param {(() => boolean)|null} a_isSelected 今の箇所を選択しているかを返す関数（null なら、すぐに戻す）
+ */
+function setCurrentSelected(a_isSelected) {
+  s_isCurrentSelected = a_isSelected;
+  document.body.classList.toggle('find-selected', null !== a_isSelected);
+}
+// 選択が変わったら確かめる（入力欄の中の選択の変化も、document の selectionchange で分かる）
+document.addEventListener('selectionchange', () => {
+  if (s_isCurrentSelected && !s_isCurrentSelected()) setCurrentSelected(null);
+});
 
 /**
  * 正規表現の特殊文字をエスケープする（正規表現を使わない検索用）。
@@ -153,7 +173,7 @@ function comparePoints(a_node, a_offset, b_node, b_offset) {
 /** Markdown モード：画面の文字で探し、Range で表す。 */
 class DocTarget {
   /**
-   * @param {object} a_deps FindPanel と同じ
+   * @param {object} a_deps FindEngine と同じ
    */
   constructor(a_deps) {
     this.d = a_deps;
@@ -232,7 +252,7 @@ class DocTarget {
   }
 
   /**
-   * 今の箇所にオレンジの色を付け、見える位置までスクロールし、選択する（パネルの入力欄はそのまま使える）。
+   * 今の箇所にオレンジの色を付け、見える位置までスクロールし、選択する。
    * @param {object} a_match 見つかった箇所
    * @param {object[]} a_matches 見つかった箇所すべて（アウトラインの印に使う）
    */
@@ -246,12 +266,20 @@ class DocTarget {
     sel.removeAllRanges();
     sel.addRange(a_match.range.cloneRange());
     if (active && document.activeElement !== active) active.focus();
+    const r = a_match.range;
+    setCurrentSelected(() => {
+      if (!sel.rangeCount) return false;
+      const now = sel.getRangeAt(0);
+      return now.startContainer === r.startContainer && now.startOffset === r.startOffset &&
+        now.endContainer === r.endContainer && now.endOffset === r.endOffset;
+    });
     this.updateOutlineMarks(a_matches);
   }
 
   /** 今の箇所のオレンジの色を消す。 */
   clearCurrent() {
     this.m_current = null;
+    setCurrentSelected(null);
     if (window.CSS && CSS.highlights) CSS.highlights.delete('find-current');
   }
 
@@ -325,7 +353,7 @@ class DocTarget {
 /** ソースモード：入力欄（textarea）の Markdown のソースで探し、文字の位置で表す。 */
 class SourceTarget {
   /**
-   * @param {object} a_deps FindPanel と同じ（source：main.js のソースモードの機能）
+   * @param {object} a_deps FindEngine と同じ（source：main.js のソースモードの機能）
    */
   constructor(a_deps) {
     this.d = a_deps;
@@ -398,6 +426,8 @@ class SourceTarget {
   select(a_match, a_matches) {
     this.m_current = { start: a_match.start, end: a_match.end };
     this.area.setSelectionRange(a_match.start, a_match.end);
+    const area = this.area;
+    setCurrentSelected(() => area.selectionStart === a_match.start && area.selectionEnd === a_match.end);
     this.highlight(a_matches);
     this.d.source.reveal(a_match.start);
   }
@@ -405,12 +435,14 @@ class SourceTarget {
   /** 今の箇所のオレンジの色を消す。 */
   clearCurrent() {
     this.m_current = null;
+    setCurrentSelected(null);
     this.d.source.highlight(this.m_all || [], null);
   }
 
   /** 色をすべて消す。 */
   clear() {
     this.m_current = null;
+    setCurrentSelected(null);
     this.m_all = [];
     this.d.source.highlight([], null);
   }
@@ -463,8 +495,8 @@ class SourceTarget {
   }
 }
 
-/** 検索と置換のパネル。 */
-export class FindPanel {
+/** 検索と置換の処理（ウィンドウはホスト側。dialog\FindReplaceWindow）。 */
+export class FindEngine {
   /**
    * @param {object} a_deps 呼び出し元（main.js）の機能
    * @param {import('./editor.js').Editor} a_deps.editor 編集部分
@@ -479,21 +511,17 @@ export class FindPanel {
    * @param {(path: string, text: string) => void} a_deps.setPendingText 開いていないファイルの内容を、保存せずに置いておく
    * @param {(hits: Set<Element>, current: Element|null) => void} a_deps.setOutlineMarks アウトラインの見出しに印を付ける
    * @param {object} a_deps.source ソースモードの機能（active・area・highlight・reveal・replaceRange。main.js 参照）
+   * @param {(update: object) => void} a_deps.postToWindow 検索と置換のウィンドウ（ホスト側）へ表示の更新を送る
+   *   （{status}・{results: string[]|null, selectedIndex}・{selectedIndex}・{step: {file, context}|null}）
    */
   constructor(a_deps) {
     this.d = a_deps;
-    const $ = (id) => document.getElementById(id);
-    this.el = {
-      panel: $('find-panel'), header: $('find-header'), close: $('find-close'),
-      query: $('find-query'), replaceBox: $('find-replace-box'), replacement: $('find-replacement'),
-      scopeFile: $('find-scope-file'), scopeFolder: $('find-scope-folder'),
-      matchCase: $('find-case'), regex: $('find-regex'),
-      prev: $('find-prev'), next: $('find-next'), all: $('find-all'),
-      stepReplace: $('find-step-replace'), replaceAll: $('find-replace-all'),
-      status: $('find-status'), results: $('find-results'),
-      step: $('find-step'), stepFile: $('find-step-file'), stepContext: $('find-step-context'),
-      stepDo: $('find-step-do'), stepSkip: $('find-step-skip'), stepRest: $('find-step-rest'), stepEnd: $('find-step-end'),
-    };
+    /** 今の検索条件（ウィンドウから命令と一緒に届く）。 */
+    this.opts = { query: '', replacement: '', folder: false, matchCase: false, regex: false };
+    /** ウィンドウを開いているか（閉じた時に色を消し、文書を変えても色を付け直さないため）。 */
+    this.m_open = false;
+    /** 検索結果の一覧の各行の動き（ダブルクリックで開く処理。ウィンドウには文字だけを送る）。 */
+    this.m_items = [];
     this.m_docTarget = new DocTarget(a_deps);
     this.m_sourceTarget = new SourceTarget(a_deps);
     /** 1件ずつ置換の途中の状態（していない時は null）。 */
@@ -501,7 +529,6 @@ export class FindPanel {
     /** 直前の「すべて検索」の検索語（違う検索語で次を検索した時に、結果の一覧を隠すため）。 */
     this.m_lastAllQuery = null;
     this.m_rehighlightTimer = 0;
-    this.bind();
   }
 
   /** 開いているファイルの中での検索の担当（ソースモードなら SourceTarget、それ以外は DocTarget）。 */
@@ -509,67 +536,61 @@ export class FindPanel {
     return this.d.source.active() ? this.m_sourceTarget : this.m_docTarget;
   }
 
-  /** ボタン・キー操作を結び付ける。 */
-  bind() {
-    const e = this.el;
-    e.close.addEventListener('click', () => this.close());
-    e.prev.addEventListener('click', () => this.findNext(true));
-    e.next.addEventListener('click', () => this.findNext(false));
-    e.all.addEventListener('click', () => this.findAll());
-    e.stepReplace.addEventListener('click', () => this.startStep());
-    e.replaceAll.addEventListener('click', () => this.replaceAll());
-    e.stepDo.addEventListener('click', () => this.stepReplace());
-    e.stepSkip.addEventListener('click', () => this.stepSkip());
-    e.stepRest.addEventListener('click', () => this.stepReplaceRest());
-    e.stepEnd.addEventListener('click', () => this.finishStep());
-    // Enter：すべて検索（mde と同じ）、Esc：閉じる
-    e.panel.addEventListener('keydown', (ev) => {
-      if ('Escape' === ev.key) { ev.preventDefault(); this.close(); return; }
-      if ('Enter' === ev.key && /^(INPUT)$/.test(ev.target.tagName) && 'text' === ev.target.type) {
-        ev.preventDefault();
-        this.findAll();
+  /**
+   * 検索と置換のウィンドウ（ホスト側の dialog\FindReplaceWindow）からの命令を実行する。
+   * @param {{action: string, query?: string, replacement?: string, folder?: boolean, matchCase?: boolean,
+   *   regex?: boolean, index?: number}} a_msg 命令（action：prev・next・all・replaceAll・stepStart・stepDo・
+   *   stepSkip・stepRest・stepEnd・openResult・close）と、その時の検索条件
+   */
+  handle(a_msg) {
+    if ('close' === a_msg.action) {
+      this.close();
+      return;
+    }
+    this.opts = {
+      query: a_msg.query || '',
+      replacement: a_msg.replacement || '',
+      folder: !!a_msg.folder,
+      matchCase: !!a_msg.matchCase,
+      regex: !!a_msg.regex,
+    };
+    this.m_open = true;
+    switch (a_msg.action) {
+      case 'prev': this.findNext(true); break;
+      case 'next': this.findNext(false); break;
+      case 'all': this.findAll(); break;
+      case 'replaceAll': this.replaceAll(); break;
+      case 'stepStart': this.startStep(); break;
+      case 'stepDo': this.stepReplace(); break;
+      case 'stepSkip': this.stepSkip(); break;
+      case 'stepRest': this.stepReplaceRest(); break;
+      case 'stepEnd': this.finishStep(); break;
+      case 'openResult': {
+        const item = this.m_items[a_msg.index];
+        if (item) item.open();
+        break;
       }
-    });
-    e.replaceBox.addEventListener('toggle', () => this.updateButtons());
-    // 見出しをドラッグして動かす
-    e.header.addEventListener('pointerdown', (ev) => {
-      if (ev.target === e.close) return;
-      const rect = e.panel.getBoundingClientRect();
-      const dx = ev.clientX - rect.left;
-      const dy = ev.clientY - rect.top;
-      e.header.setPointerCapture(ev.pointerId);
-      const move = (m) => {
-        e.panel.style.left = `${Math.max(0, Math.min(window.innerWidth - 80, m.clientX - dx))}px`;
-        e.panel.style.top = `${Math.max(0, Math.min(window.innerHeight - 40, m.clientY - dy))}px`;
-        e.panel.style.right = 'auto';
-      };
-      const up = () => {
-        e.header.removeEventListener('pointermove', move);
-        e.header.removeEventListener('pointerup', up);
-      };
-      e.header.addEventListener('pointermove', move);
-      e.header.addEventListener('pointerup', up);
-    });
+      default: break;
+    }
   }
 
-  /** パネルを開いているか。 */
+  /**
+   * ウィンドウへ表示の更新を送る。
+   * @param {object} a_update 更新する内容
+   */
+  post(a_update) {
+    this.d.postToWindow(a_update);
+  }
+
+  /** ウィンドウを開いているか。 */
   get isOpen() {
-    return !this.el.panel.hidden;
+    return this.m_open;
   }
 
-  /** パネルを開く（開いていれば前に出す）。検索する文字列の欄を選択した状態にする。 */
-  open() {
-    this.el.panel.hidden = false;
-    this.updateScope();
-    this.updateButtons();
-    this.el.query.focus();
-    this.el.query.select();
-  }
-
-  /** パネルを閉じる。色・アウトラインとフォルダビューの印を消す。 */
+  /** ウィンドウが閉じられた時：色・アウトラインとフォルダビューの印を消し、編集部分に入力を戻す。 */
   close() {
     this.endStepSilently();
-    this.el.panel.hidden = true;
+    this.m_open = false;
     this.clearHighlights();
     this.d.folder.clearSearchHits();
     if (this.d.source.active()) this.d.source.area.focus();
@@ -582,23 +603,9 @@ export class FindPanel {
     this.m_sourceTarget.clear();
   }
 
-  /** 対象範囲の選択肢を、フォルダを開いているかに合わせる（開いていなければ「現在のファイル」だけ）。 */
-  updateScope() {
-    const open = this.d.folder.isOpen;
-    this.el.scopeFolder.disabled = !open;
-    if (!open) this.el.scopeFile.checked = true;
-  }
-
-  /** 置換のボタンを、「置換後の文字列」を開いている時だけ表示する（mde と同じ）。 */
-  updateButtons() {
-    const show = this.el.replaceBox.open;
-    this.el.stepReplace.hidden = !show;
-    this.el.replaceAll.hidden = !show;
-  }
-
-  /** 対象範囲がフォルダ全体か。 */
+  /** 対象範囲がフォルダ全体か（フォルダを開いていない時は、現在のファイル）。 */
   get folderScope() {
-    return this.el.scopeFolder.checked && this.d.folder.isOpen;
+    return this.opts.folder && this.d.folder.isOpen;
   }
 
   /**
@@ -606,11 +613,11 @@ export class FindPanel {
    * @returns {RegExp|null}
    */
   buildRegex() {
-    const q = this.el.query.value;
+    const q = this.opts.query;
     if (!q) return null;
-    const flags = this.el.matchCase.checked ? 'g' : 'gi';
+    const flags = this.opts.matchCase ? 'g' : 'gi';
     try {
-      return new RegExp(this.el.regex.checked ? q : escapeRegExp(q), flags);
+      return new RegExp(this.opts.regex ? q : escapeRegExp(q), flags);
     } catch (ex) {
       this.setStatus(`正規表現が正しくありません：${ex.message}`);
       return null;
@@ -622,7 +629,7 @@ export class FindPanel {
    * @param {string} a_text 表示する文
    */
   setStatus(a_text) {
-    this.el.status.textContent = a_text;
+    this.post({ status: a_text });
   }
 
   /** 今開いているファイルの名前（新規の文書は「無題」）。 */
@@ -640,7 +647,7 @@ export class FindPanel {
   async findNext(a_backward) {
     const re = this.buildRegex();
     if (!re) return;
-    if (this.m_lastAllQuery !== this.el.query.value) this.hideResults();
+    if (this.m_lastAllQuery !== this.opts.query) this.hideResults();
     let t = this.target;
     if (!this.folderScope) {
       const matches = t.find(re);
@@ -704,7 +711,7 @@ export class FindPanel {
     const re = this.buildRegex();
     if (!re) return;
     this.endStepSilently();
-    this.m_lastAllQuery = this.el.query.value;
+    this.m_lastAllQuery = this.opts.query;
     const t = this.target;
     if (!this.folderScope) {
       this.d.folder.clearSearchHits();
@@ -774,44 +781,27 @@ export class FindPanel {
   }
 
   /**
-   * 検索結果の一覧を表示する。
+   * 検索結果の一覧を表示する（ウィンドウには文字だけを送り、ダブルクリックの処理はここで持つ）。
    * @param {{label: string, open: () => void, path?: string}[]} a_items 一覧の行
    */
   showResults(a_items) {
-    const ul = this.el.results;
-    ul.replaceChildren();
-    for (const item of a_items) {
-      const li = ul.appendChild(document.createElement('li'));
-      li.textContent = item.label;
-      if (item.path) li.dataset.path = item.path.toLowerCase();
-      li.addEventListener('mousedown', (e) => { if (e.detail > 1) e.preventDefault(); });
-      li.addEventListener('click', () => this.markResult(li));
-      li.addEventListener('dblclick', () => { this.markResult(li); item.open(); });
-    }
-    ul.hidden = false;
+    this.m_items = a_items;
+    this.post({ results: a_items.map((x) => x.label), selectedIndex: -1 });
   }
 
   /**
-   * 一覧の行を選択した色にする。
-   * @param {HTMLElement} a_li 行
-   */
-  markResult(a_li) {
-    for (const li of this.el.results.children) li.classList.toggle('selected', li === a_li);
-  }
-
-  /**
-   * フォルダ全体の一覧で、そのファイルの行を選択した色にする。
+   * フォルダ全体の一覧で、そのファイルの行を選択した状態にする。
    * @param {string} a_path ファイルのパス
    */
   selectResult(a_path) {
-    const li = [...this.el.results.children].find((x) => x.dataset.path === a_path.toLowerCase());
-    if (li) this.markResult(li);
+    const i = this.m_items.findIndex((x) => x.path && x.path.toLowerCase() === a_path.toLowerCase());
+    if (i >= 0) this.post({ selectedIndex: i });
   }
 
   /** 検索結果の一覧を隠す。 */
   hideResults() {
-    this.el.results.hidden = true;
-    this.el.results.replaceChildren();
+    this.m_items = [];
+    this.post({ results: null });
   }
 
   // ===== すべて置換 =====
@@ -821,8 +811,8 @@ export class FindPanel {
     const re = this.buildRegex();
     if (!re) return;
     this.endStepSilently();
-    const repl = this.el.replacement.value;
-    const replaceText = this.el.regex.checked ? repl : repl.replace(/\$/g, '$$$$');
+    const repl = this.opts.replacement;
+    const replaceText = this.opts.regex ? repl : repl.replace(/\$/g, '$$$$');
     if (!this.folderScope) {
       const text = this.d.currentMarkdown();
       const count = findAllIn(text, re).length;
@@ -887,16 +877,13 @@ export class FindPanel {
       const t = this.target;
       t.clearCurrent();
       this.m_step = { folder: false, re, count: 0, target: t, anchor: t.anchor() };
-      this.el.stepFile.textContent = '現在のファイル';
-      this.el.stepContext.textContent = 'エディタ内で強調表示された箇所をご確認ください。';
-      this.el.step.hidden = false;
+      this.post({ step: { file: '現在のファイル', context: 'エディタ内で強調表示された箇所をご確認ください。' } });
       this.stepShowNext();
       return;
     }
     // フォルダ全体：フォルダの先頭のファイルから順に、Markdown のソースで1件ずつ
     const files = (await this.d.folderFiles()).filter((f) => findAllIn(f.text, re).length);
     this.m_step = { folder: true, re, count: 0, files, fileIndex: 0, pos: 0, changed: false, touched: 0 };
-    this.el.step.hidden = false;
     this.stepShowNext();
   }
 
@@ -921,11 +908,11 @@ export class FindPanel {
       while ((m = st.re.exec(f.text)) && 0 === m[0].length) st.re.lastIndex++;
       if (m) {
         st.match = m;
-        this.el.stepFile.textContent = this.d.folder.relativePath(f.path) || f.path;
+        const file = this.d.folder.relativePath(f.path) || f.path;
         const before = f.text.slice(Math.max(0, m.index - CONTEXT_CHARS), m.index);
         const after = f.text.slice(m.index + m[0].length, m.index + m[0].length + CONTEXT_CHARS);
         const clean = (s) => s.replace(/\r/g, '').replace(/\n/g, '⏎');
-        this.el.stepContext.textContent = `…${clean(before)}【${clean(m[0])}】${clean(after)}…`;
+        this.post({ step: { file, context: `…${clean(before)}【${clean(m[0])}】${clean(after)}…` } });
         return;
       }
       this.stepNextFile();
@@ -950,14 +937,14 @@ export class FindPanel {
   stepReplace() {
     const st = this.m_step;
     if (!st || !st.match) return;
-    const useRegex = this.el.regex.checked;
+    const useRegex = this.opts.regex;
     if (!st.folder) {
-      const text = expandReplacement(st.match.match, this.el.replacement.value, useRegex);
+      const text = expandReplacement(st.match.match, this.opts.replacement, useRegex);
       st.anchor = st.target.replace([{ match: st.match, text }]);
     } else {
       const f = st.files[st.fileIndex];
       const m = st.match;
-      const text = expandReplacement(m, this.el.replacement.value, useRegex);
+      const text = expandReplacement(m, this.opts.replacement, useRegex);
       f.text = f.text.slice(0, m.index) + text + f.text.slice(m.index + m[0].length);
       st.pos = m.index + text.length;
       st.changed = true;
@@ -983,8 +970,8 @@ export class FindPanel {
   stepReplaceRest() {
     const st = this.m_step;
     if (!st || !st.match) return;
-    const repl = this.el.replacement.value;
-    const useRegex = this.el.regex.checked;
+    const repl = this.opts.replacement;
+    const useRegex = this.opts.regex;
     if (!st.folder) {
       const t = st.target;
       const matches = t.find(st.re);
@@ -1020,7 +1007,7 @@ export class FindPanel {
     if (!st) return;
     if (st.folder && st.fileIndex < st.files.length) this.stepNextFile();
     this.m_step = null;
-    this.el.step.hidden = true;
+    this.post({ step: null });
     this.afterReplace();
     if (!st.folder) {
       this.setStatus(st.count
@@ -1039,23 +1026,23 @@ export class FindPanel {
     if (!st) return;
     if (st.folder && st.fileIndex < st.files.length) this.stepNextFile();
     this.m_step = null;
-    this.el.step.hidden = true;
+    this.post({ step: null });
   }
 
   // ===== 文書の変化への対応（main.js から呼ぶ）=====
 
-  /** ファイルを開いた・読み直した・表示のモードを切り替えた時：パネルを開いていれば、新しい内容で色を付け直す。 */
+  /** ファイルを開いた・読み直した・表示のモードを切り替えた時：ウィンドウを開いていれば、新しい内容で色を付け直す。 */
   onDocumentLoaded() {
     this.clearHighlights();
     if (!this.isOpen) return;
     if (this.m_step && !this.m_step.folder) this.endStepSilently();
-    const re = this.el.query.value ? this.buildRegex() : null;
+    const re = this.opts.query ? this.buildRegex() : null;
     if (re) this.target.highlight(this.target.find(re));
   }
 
   /** 文書を編集した時：少し待ってから色を付け直す（今の箇所は、まだ残っていれば残す）。 */
   onDocumentChanged() {
-    if (!this.isOpen || !this.el.query.value) return;
+    if (!this.isOpen || !this.opts.query) return;
     clearTimeout(this.m_rehighlightTimer);
     this.m_rehighlightTimer = setTimeout(() => {
       const re = this.buildRegex();

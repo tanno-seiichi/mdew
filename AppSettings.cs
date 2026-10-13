@@ -18,6 +18,18 @@ namespace mdew
         /// <summary>終了時に最大化していたか。</summary>
         public bool IsMaximized { get; set; }
 
+        /// <summary>PDF に書き出す時の上の余白（px。1px = 1/96 インチ。メニュー「PDFの余白を設定…」。既定値は mde と同じ）。</summary>
+        public double PdfMarginTop { get; set; } = dialog.PdfMarginDialog.DEFAULT_TOP;
+        /// <summary>PDF に書き出す時の下の余白（px）。</summary>
+        public double PdfMarginBottom { get; set; } = dialog.PdfMarginDialog.DEFAULT_BOTTOM;
+        /// <summary>PDF に書き出す時の左の余白（px）。</summary>
+        public double PdfMarginLeft { get; set; } = dialog.PdfMarginDialog.DEFAULT_LEFT;
+        /// <summary>PDF に書き出す時の右の余白（px）。</summary>
+        public double PdfMarginRight { get; set; } = dialog.PdfMarginDialog.DEFAULT_RIGHT;
+
+        /// <summary>最近使ったファイル（フルパス。先頭が最新。メニュー「ファイル」→「最近使ったファイル」）。</summary>
+        public System.Collections.Generic.List<string> RecentFiles { get; set; } = new System.Collections.Generic.List<string>();
+
         /// <summary>設定ファイルのパス。</summary>
         private static readonly string s_path = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "settings.json");
@@ -33,7 +45,9 @@ namespace mdew
             {
                 if (File.Exists(s_path))
                 {
-                    return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(s_path)) ?? new AppSettings();
+                    var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(s_path)) ?? new AppSettings();
+                    settings.RecentFiles ??= new System.Collections.Generic.List<string>();
+                    return settings;
                 }
             }
             catch (Exception)

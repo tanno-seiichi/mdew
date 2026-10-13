@@ -37,6 +37,7 @@
   --code-block-bg: #f3f4f4;
   --code-border: #e7eaed;
   --text: #1c1c1c;
+  --selection-bg: #c8d6e8; /* 範囲選択の色（Typora は #dae3e9、サクラエディタは #c1cfe3。文字の色は変えない） */
 }
 
 html, body { height: 100%; margin: 0; }
@@ -74,55 +75,58 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
 /* ===== 文書の見た目 ===== */
 #doc {
   max-width: 980px; margin: 0 auto; padding: 24px 48px 120px;
+}
+/* 文書の見た目は、PDF に書き出す時の印刷用の文書（#print-doc）にも使う */
+:is(#doc, #print-doc) {
   font-family: var(--doc-font); font-size: var(--doc-font-size); line-height: var(--doc-line-height); outline: none;
   word-wrap: break-word;
 }
-#doc > :first-child { margin-top: 0; }
-#doc p { margin: 0 0 0.8em; }
+:is(#doc, #print-doc) > :first-child { margin-top: 0; }
+:is(#doc, #print-doc) p { margin: 0 0 0.8em; }
 /* 見出しの大きさは本文の文字の大きさ（--doc-font-size）に対する比率 */
-#doc h1, #doc h2, #doc h3, #doc h4, #doc h5, #doc h6 { line-height: 1.4; margin: 1.2em 0 0.6em; font-weight: 700; }
-#doc h1 { font-size: 1.875em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
-#doc h2 { font-size: 1.5em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
-#doc h3 { font-size: 1.25em; }
-#doc h4 { font-size: 1.0625em; }
-#doc h5, #doc h6 { font-size: 1em; }
-#doc ul, #doc ol { margin: 0 0 0.8em; padding-left: 1.8em; }
-#doc li > ul, #doc li > ol { margin-bottom: 0; }
-#doc ul { list-style-type: disc; }
-#doc ul ul { list-style-type: circle; }
-#doc ul ul ul { list-style-type: square; }
+:is(#doc, #print-doc) h1, :is(#doc, #print-doc) h2, :is(#doc, #print-doc) h3, :is(#doc, #print-doc) h4, :is(#doc, #print-doc) h5, :is(#doc, #print-doc) h6 { line-height: 1.4; margin: 1.2em 0 0.6em; font-weight: 700; }
+:is(#doc, #print-doc) h1 { font-size: 1.875em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
+:is(#doc, #print-doc) h2 { font-size: 1.5em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
+:is(#doc, #print-doc) h3 { font-size: 1.25em; }
+:is(#doc, #print-doc) h4 { font-size: 1.0625em; }
+:is(#doc, #print-doc) h5, :is(#doc, #print-doc) h6 { font-size: 1em; }
+:is(#doc, #print-doc) ul, :is(#doc, #print-doc) ol { margin: 0 0 0.8em; padding-left: 1.8em; }
+:is(#doc, #print-doc) li > ul, :is(#doc, #print-doc) li > ol { margin-bottom: 0; }
+:is(#doc, #print-doc) ul { list-style-type: disc; }
+:is(#doc, #print-doc) ul ul { list-style-type: circle; }
+:is(#doc, #print-doc) ul ul ul { list-style-type: square; }
 /* チェックボックスは箇条書きの記号と同じ位置（項目の左側）に置き、文字の位置・入れ子の字下げ幅を
    通常の箇条書きと揃える */
-#doc li.task { list-style: none; position: relative; }
-#doc li.task > input[type=checkbox] {
+:is(#doc, #print-doc) li.task { list-style: none; position: relative; }
+:is(#doc, #print-doc) li.task > input[type=checkbox] {
   position: absolute; left: -1.35em; top: 0.48em; margin: 0; width: 0.85em; height: 0.85em; cursor: pointer;
 }
-#doc blockquote { margin: 0 0 0.8em; padding: 0 1em; border-left: 4px solid #d0d7de; color: #555; }
-#doc blockquote > :last-child { margin-bottom: 0; }
-#doc hr { border: none; border-top: 2px solid #d0d7de; margin: 1.2em 0; }
-#doc code {
+:is(#doc, #print-doc) blockquote { margin: 0 0 0.8em; padding: 0 1em; border-left: 4px solid #d0d7de; color: #555; }
+:is(#doc, #print-doc) blockquote > :last-child { margin-bottom: 0; }
+:is(#doc, #print-doc) hr { border: none; border-top: 2px solid #d0d7de; margin: 1.2em 0; }
+:is(#doc, #print-doc) code {
   font-family: var(--code-font); font-size: var(--code-font-size); color: var(--code-text);
   background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 3px; padding: 1px 4px 0;
 }
-#doc pre {
+:is(#doc, #print-doc) pre {
   font-family: var(--code-font); font-size: var(--code-block-font-size); line-height: var(--code-block-line-height);
   color: var(--code-text); background: var(--code-block-bg); border: 1px solid var(--code-border); border-radius: 3px;
   padding: 8px 16px; margin: 0 0 0.8em; white-space: pre-wrap;
 }
-#doc pre code { background: none; border: none; padding: 0; font-size: inherit; }
-#doc pre[data-info]:not([data-info=""])::before {
+:is(#doc, #print-doc) pre code { background: none; border: none; padding: 0; font-size: inherit; }
+:is(#doc, #print-doc) pre[data-info]:not([data-info=""])::before {
   content: attr(data-info); display: block; float: right; color: #999; font-size: 12px; user-select: none;
 }
-#doc .md-raw {
+:is(#doc, #print-doc) .md-raw {
   font-family: var(--code-font); white-space: pre-wrap; color: #777; font-size: 14px;
   margin: 0 0 0.8em; padding: 2px 6px; border-left: 3px solid #e3e3e3;
 }
-#doc table { border-collapse: collapse; margin: 0 0 0.8em; }
-#doc th, #doc td { border: 1px solid #c8ccd1; padding: 4px 10px; min-width: 3em; vertical-align: top; }
-#doc th { background: #f1f3f5; }
-#doc img { max-width: 100%; vertical-align: bottom; }
-#doc a { color: #0b62c4; text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
-#doc mark { background: #fff3a3; }
+:is(#doc, #print-doc) table { border-collapse: collapse; margin: 0 0 0.8em; }
+:is(#doc, #print-doc) th, :is(#doc, #print-doc) td { border: 1px solid #c8ccd1; padding: 4px 10px; min-width: 3em; vertical-align: top; }
+:is(#doc, #print-doc) th { background: #f1f3f5; }
+:is(#doc, #print-doc) img { max-width: 100%; vertical-align: bottom; }
+:is(#doc, #print-doc) a { color: #0b62c4; text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
+:is(#doc, #print-doc) mark { background: #fff3a3; }
 
 #statusbar {
   display: flex; gap: 16px; padding: 3px 10px; border-top: 1px solid var(--line);
@@ -136,6 +140,9 @@ body.no-statusbar #statusbar { display: none; } /* メニュー「表示」→�
 /* Debug ビルドの時だけ表示する部分（停止・入力遅延の回数。ホストから init で debug が届くと body に debug を付ける） */
 .debug-only { display: none; }
 body.debug .debug-only { display: inline; }
+
+/* 範囲選択の見た目（Typora・サクラエディタと同じく、淡い青の背景で、文字の色はそのまま） */
+::selection { background: var(--selection-bg); color: inherit; }
 
 /* ソースモード（Markdown のソースを直接編集する。背景の色・余白は mde と同じ）。入力欄（#source）と、
    その後ろに重ねる要素（#source-backdrop。検索の色・行の位置を測る）は、文字の配置がまったく同じになるようにする */
@@ -186,45 +193,11 @@ body.folder-open.no-folderpane #folder, body.folder-open.no-folderpane #folder-s
 /* 検索と置換：見つかった箇所の色（黄色）、今の箇所（オレンジ）。mde と同じ色 */
 ::highlight(find-all) { background-color: #ffe166; }
 ::highlight(find-current) { background-color: #ffa54d; }
+/* 今の箇所を選択している間は、範囲選択の色を付けない（今の箇所のオレンジが見えるように。find.js の setCurrentSelected） */
+body.find-selected #doc ::selection, body.find-selected #source::selection { background: transparent; }
 #outline-list li.search-hit { background: #ffe166; }
 #outline-list li.search-current { background: #cbe8f6; }
 #outline-list li.search-hit.search-current { background: #ffe166; outline: 1px solid #26a0da; outline-offset: -1px; }
-
-/* 検索と置換のパネル（右上に重ねて表示。見出しをドラッグして動かせる） */
-#find-panel {
-  position: fixed; top: 40px; right: 24px; z-index: 80; width: 540px; max-width: calc(100vw - 32px);
-  background: #ffffff; border: 1px solid #c8ccd1; border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-  font-family: var(--ui-font); font-size: 13px; color: var(--text);
-}
-#find-panel[hidden] { display: none; }
-#find-header {
-  display: flex; align-items: center; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line);
-  background: var(--pane-bg); border-radius: 6px 6px 0 0; cursor: move; user-select: none; font-weight: bold;
-}
-#find-header span { flex: 1; }
-#find-close { font: inherit; border: none; background: transparent; cursor: pointer; padding: 0 6px; font-size: 16px; }
-#find-close:hover { background: #e6e8eb; border-radius: 4px; }
-.find-body { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
-.find-body input[type="text"] { width: 100%; box-sizing: border-box; font-family: Consolas, var(--ui-font); font-size: 13px; padding: 3px 6px; }
-#find-replace-box summary { cursor: pointer; margin-bottom: 4px; }
-.find-row { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
-.find-row label { display: inline-flex; align-items: center; gap: 3px; }
-.find-label { color: #555; }
-.find-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
-.find-buttons button { font: inherit; padding: 3px 12px; }
-.find-buttons button.default { font-weight: bold; }
-#find-status { color: #666; font-size: 12px; min-height: 1.2em; white-space: pre-wrap; }
-#find-results {
-  list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; border: 1px solid var(--line);
-  font-family: Consolas, var(--ui-font); font-size: 12px;
-}
-#find-results li { padding: 2px 6px; cursor: default; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#find-results li:hover { background: #e8f0fe; }
-#find-results li.selected { background: #cbe8f6; }
-#find-step { background: #eef4fb; border: 1px solid #c8dcf0; border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
-#find-step[hidden] { display: none; }
-#find-step-file { font-weight: bold; }
-#find-step-context { font-family: Consolas, var(--ui-font); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
 
 /* 右クリックのメニュー・「ファイル」のメニュー */
 .md-menu {
@@ -236,6 +209,9 @@ body.folder-open.no-folderpane #folder, body.folder-open.no-folderpane #folder-s
   display: flex; align-items: center; width: 100%; padding: 5px 16px 5px 6px; border: none; background: none;
   text-align: left; font: inherit; color: var(--text); cursor: pointer; white-space: nowrap;
 }
+.md-menu { max-width: calc(100vw - 8px); }
+/* 長い項目（最近使ったファイルのフルパス等）は、画面に収まらない分を「…」にする（マウスを乗せると全体を表示する） */
+.md-menu button .label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .md-menu button .check { width: 18px; flex: none; text-align: center; color: #0b62c4; }
 .md-menu button .key { margin-left: auto; padding-left: 28px; color: #888; font-size: 12px; }
 .md-menu button:disabled .key { color: #bbb; }
@@ -249,3 +225,18 @@ body.folder-open.no-folderpane #folder, body.folder-open.no-folderpane #folder-s
 #splitter:hover, body.resizing #splitter { background: rgba(11, 98, 196, 0.25); }
 body.no-outline #splitter { display: none; }
 body.resizing { cursor: col-resize; user-select: none; }
+
+/* 画像はダブルクリックで開ける（右クリックの「画像を開く」も同じ） */
+#doc img { cursor: pointer; }
+
+/* ===== PDF に書き出す時（印刷）の見た目。余白・用紙（A4）はホストが指定する（Program.cs の ExportPdfAsync） ===== */
+#print-doc { display: none; }
+@media print {
+  html, body { height: auto; }
+  #app, .md-menu { display: none !important; }
+  #print-doc { display: block; }
+  #print-doc > :first-child { margin-top: 0; }
+  #print-doc :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+  #print-doc :is(img, tr) { break-inside: avoid; }
+  #print-doc pre { white-space: pre-wrap; }
+}

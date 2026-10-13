@@ -5,16 +5,23 @@
 //                {cmd:'dirty', value} / {cmd:'newWindow'} / {cmd:'pasteImage', id, type, data} / {cmd:'imeOn'} /
 //                {cmd:'openUrl', url} / {cmd:'openRelative', path} / {cmd:'devTools'} / {cmd:'about'} /
 //                {cmd:'openFolder', relPath} / {cmd:'listDir', path} / {cmd:'openPath', path} /
-//                {cmd:'readFolderFiles', reqId, root} / {cmd:'saveAll', files:[{path, markdown, images, current}]}
+//                {cmd:'readFolderFiles', reqId, root} / {cmd:'saveAll', files:[{path, markdown, images, current}]} /
+//                {cmd:'openFind'} / {cmd:'findUpdate', status | results, selectedIndex | step} /
+//                {cmd:'openImage', src} / {cmd:'exportPdf', name} / {cmd:'pdfMargin'} /
+//                {cmd:'openRecent', path} / {cmd:'clearRecent'} / {cmd:'close'} /
+//                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
-//                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug} /
+//                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug, tempDir} /
 //                {cmd:'folderOpened', root, name} / {cmd:'dirList', path, dirs, files} /
-//                {cmd:'folderFiles', reqId, files:[{path, text}]} / {cmd:'savedAll', saved, failed:[{path, message}]}
+//                {cmd:'folderFiles', reqId, files:[{path, text}]} / {cmd:'savedAll', saved, failed:[{path, message}]} /
+//                {cmd:'findCommand', action, query, replacement, folder, matchCase, regex, index} /
+//                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files} / {cmd:'imagesImported', id, urls}
 import { Editor, showMenu } from './editor.js';
-import { setJoinSoftBreaks } from './markdown.js';
+import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
-import { FindPanel } from './find.js';
+import { FindEngine } from './find.js';
+import { setHostClipboardWriter } from './clipboard.js';
 
 /** ホスト（WebView2）とのやり取りの窓口。ブラウザ単体で開いた場合（動作確認用）は null。 */
 const host = window.chrome?.webview ?? null;
@@ -34,6 +41,8 @@ const state = {
   pendingSave: null, // 保存要求中の内容（保存完了時に元テキストとして取り込み直す）
   nextImageId: 1, // 貼り付けた画像の番号（ホストからの imagePasted と対応させる）
   sourceMode: false, // ソースモード（Markdown のソースを直接編集する）か。終了時には覚えない
+  tempDir: null, // 貼り付けた画像の一時フォルダ（ホストから init で届く。他のアプリへのコピーで使う）
+  recentFiles: [], // 最近使ったファイル（フルパス。先頭が最新。ホストから recentFiles で届く）
 };
 
 /**
@@ -49,13 +58,18 @@ const editor = new Editor($('doc'), {
   onChange: () => {
     setDirty(true);
     scheduleOutline();
-    findPanel.onDocumentChanged();
+    findEngine.onDocumentChanged();
   },
   onOpenLink: (a_href) => openLink(a_href),
   onError: (a_message) => alert(a_message),
   onHoverLink: (a_href) => {
     $('status-link').textContent = a_href ? `クリックで開く：${a_href}` : '';
   },
+  onOpenImage: (a_src) => {
+    if (a_src) send({ cmd: 'openImage', src: a_src });
+  },
+  imageFileUrl: (a_img) => imageFileUrl(a_img),
+  importImages: (a_srcs) => importImages(a_srcs),
   onPasteImage: (a_file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -65,6 +79,73 @@ const editor = new Editor($('doc'), {
     reader.readAsDataURL(a_file);
   },
 });
+
+/** 画像のコピーを頼んで、結果を待っている要求（番号 → resolve）。 */
+const importWaiters = new Map();
+let nextImportId = 1;
+
+/**
+ * 他のアプリが置いた画像のファイル（Excel の一時ファイル等。file:///…）を、貼り付けた画像と同じ一時フォルダへ
+ * ホストにコピーしてもらう（保存する時に「<ファイル名>.images」へ移る）。
+ * @param {string[]} a_srcs 画像の参照先
+ * @returns {Promise<(string|null)[]>} それぞれの画像の URL（https://tmp.mdew/…。コピーできなければ null）
+ */
+function importImages(a_srcs) {
+  if (!host) return Promise.resolve(a_srcs.map(() => null));
+  const id = nextImportId++;
+  return new Promise((resolve) => {
+    importWaiters.set(id, resolve);
+    send({ cmd: 'importImages', id, srcs: a_srcs });
+  });
+}
+
+// 「Excel用にコピー」「表をコピー」は、ホストがクリップボードに書き込む（clipboard.js の setHostClipboardWriter）
+if (host) setHostClipboardWriter((a_data) => send({ cmd: 'copyHtml', html: a_data.html, text: a_data.text }));
+
+/**
+ * パスを file:/// の URL にする（C:\dir\a b.png → file:///C:/dir/a%20b.png、\\server\share\a.png → file://server/share/a.png）。
+ * @param {string} a_path Windows のパス
+ * @returns {string}
+ */
+function toFileUrl(a_path) {
+  const unc = /^[\\/]{2}/.test(a_path);
+  const parts = a_path.replace(/^[\\/]+/, '').split(/[\\/]+/).map((p, k) =>
+    (0 === k && /^[a-zA-Z]:$/.test(p) ? p : encodeURIComponent(p)));
+  return `${unc ? 'file://' : 'file:///'}${parts.join('/')}`;
+}
+
+/**
+ * フォルダのパスと相対パスをつなぐ（「.」「..」を解決する）。
+ * @param {string} a_dir フォルダのパス
+ * @param {string} a_rel 相対パス（区切りは / か \）
+ * @returns {string}
+ */
+function joinPath(a_dir, a_rel) {
+  const prefix = /^[\\/]{2}/.test(a_dir) ? '\\\\' : ''; // \\server\share
+  const parts = a_dir.split(/[\\/]+/).filter(Boolean);
+  for (const p of a_rel.split(/[\\/]+/)) {
+    if ('..' === p) { if (parts.length > 1) parts.pop(); } else if (p && '.' !== p) parts.push(p);
+  }
+  return prefix + parts.join('\\');
+}
+
+/**
+ * 画像のファイルの場所（他のアプリへコピーする時に、HTML の画像の参照先にする。mde と同じく file:/// の URL）。
+ * http・https の画像はそのまま。貼り付けた画像（まだ保存していない）は一時フォルダのファイル、相対パスは開いている
+ * ファイルのフォルダ基準。分からない場合（保存していない文書の相対パス、data: 等）は null。
+ * @param {HTMLImageElement} a_img 画像
+ * @returns {string|null}
+ */
+function imageFileUrl(a_img) {
+  const raw = imageSource(a_img).trim();
+  if (!raw) return null;
+  const tmp = raw.match(/^https:\/\/tmp\.mdew\/([^?#]+)/i);
+  if (tmp) return state.tempDir ? toFileUrl(joinPath(state.tempDir, decodeURIComponentSafe(tmp[1]))) : null;
+  if (/^https?:/i.test(raw) || /^file:/i.test(raw)) return raw;
+  if (/^[a-zA-Z]:[\\/]/.test(raw) || /^\\\\/.test(raw)) return toFileUrl(raw);
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) || raw.startsWith('//') || !state.path) return null;
+  return toFileUrl(joinPath(state.path.replace(/[\\/][^\\/]*$/, ''), decodeURIComponentSafe(raw.split(/[?#]/)[0])));
+}
 
 /**
  * 画像など文書内の相対パスを、開いているファイルのフォルダ基準で解決させる
@@ -258,24 +339,37 @@ function slugify(a_text) {
  * @param {string} a_fragment リンクの # より後ろ（URL エンコードされていてもよい）
  */
 function jumpToHeading(a_fragment) {
+  const h = findHeading(editor.headings(), a_fragment);
+  if (!h) {
+    alert(`リンク先の見出しが見つかりません。\n#${a_fragment}`);
+    return;
+  }
+  h.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const range = document.createRange();
+  range.setStart(h, 0);
+  range.collapse(true);
+  getSelection().removeAllRanges();
+  getSelection().addRange(range);
+}
+
+/**
+ * 「#見出し」のリンク先の見出しを探す（GitHub と同じ形の名前か、見出しの文字そのものと比べる。同じ名前の見出しが
+ * 複数ある場合は、2つ目以降は「名前-1」「名前-2」…）。
+ * @param {Element[]} a_headings 文書の見出し（文書の順）
+ * @param {string} a_fragment リンクの # より後ろ（URL エンコードされていてもよい）
+ * @returns {Element|null}
+ */
+function findHeading(a_headings, a_fragment) {
   const target = decodeURIComponentSafe(a_fragment).toLowerCase();
   const used = new Map();
-  for (const h of editor.headings()) {
+  for (const h of a_headings) {
     const base = slugify(h.textContent.replace(/\u200b/g, ''));
     const count = used.get(base) || 0;
     used.set(base, count + 1);
     const slug = 0 === count ? base : `${base}-${count}`;
-    if (slug === target || h.textContent.trim().toLowerCase() === target) {
-      h.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      const range = document.createRange();
-      range.setStart(h, 0);
-      range.collapse(true);
-      getSelection().removeAllRanges();
-      getSelection().addRange(range);
-      return;
-    }
+    if (slug === target || h.textContent.trim().toLowerCase() === target) return h;
   }
-  alert(`リンク先の見出しが見つかりません。\n#${a_fragment}`);
+  return null;
 }
 
 // ---- アウトラインの幅（境界をドラッグして変更。次回起動時も同じ幅にする）-----
@@ -426,6 +520,17 @@ function openFile(a_path) {
     openWaiter = { key: pathKey(a_path), resolve };
     send({ cmd: 'openPath', path: a_path });
   });
+}
+
+/**
+ * メニュー「ファイル」→「最近使ったファイル」の項目：そのファイルを開く（保存していない変更があれば、開くと同じく確認する）。
+ * ファイルが無い場合は、ホストが知らせて一覧から消す。
+ * @param {string} a_path ファイルのフルパス
+ */
+function openRecent(a_path) {
+  if (state.path && pathKey(a_path) === pathKey(state.path)) return;
+  if (mustConfirmDiscard() && !confirm('保存されていない変更があります。破棄して別のファイルを開きますか？')) return;
+  send({ cmd: 'openRecent', path: a_path });
 }
 
 /** メニュー「ファイル」→「フォルダを開く...」：保存していない変更があれば確認してから、フォルダを選ぶダイアログを出してもらう。 */
@@ -666,7 +771,7 @@ sourceArea.addEventListener('input', () => {
   sourceBackdropStale = true;
   sourceBackdrop.textContent = '';
   scheduleOutline();
-  findPanel.onDocumentChanged();
+  findEngine.onDocumentChanged();
 });
 sourceArea.addEventListener('scroll', () => { sourceBackdrop.scrollTop = sourceArea.scrollTop; });
 
@@ -762,18 +867,20 @@ function setSourceMode(a_on) {
     }
     buildOutline();
     const blocks = positions.map((p) => p.el);
-    const top = blockIndexAt(positions, topOffset);
-    if (top >= 0) blocks[top].scrollIntoView({ block: 'start' });
-    else wrap.scrollTop = 0;
+    // 先にカーソルを置く（カーソルを置くと、その位置まで表示が動くため）。その後で、入力欄の一番上に見えていた
+    // まとまりを、一番上に表示する（ソースモードへ切り替えた時と同じ順）
     editor.focus();
     const ci = blockIndexAt(positions, caretOffset);
     if (ci >= 0) editor.setCaret({ index: [...$('doc').children].indexOf(blocks[ci]), offset: 0 });
+    const top = blockIndexAt(positions, topOffset);
+    if (top >= 0) blocks[top].scrollIntoView({ block: 'start' });
+    else wrap.scrollTop = 0;
   }
-  findPanel.onDocumentLoaded();
+  findEngine.onDocumentLoaded();
 }
 
 // ---- 検索と置換（find.js）---------------------------------------------------------
-const findPanel = new FindPanel({
+const findEngine = new FindEngine({
   editor,
   doc: $('doc'),
   folder: folderView,
@@ -791,7 +898,17 @@ const findPanel = new FindPanel({
     reveal: (a_pos) => revealSourcePosition(a_pos),
     replaceRange: (a_start, a_end, a_text) => replaceSourceRange(a_start, a_end, a_text),
   },
+  postToWindow: (a_update) => {
+    if (host) send({ cmd: 'findUpdate', ...a_update });
+    else findUpdates.push(a_update); // ブラウザ単体の自動テスト用
+  },
 });
+/** ブラウザ単体の自動テストで、ウィンドウへ送るはずだった表示の更新を記録する。 */
+const findUpdates = [];
+/** 検索と置換のウィンドウを開く（ホスト側の dialog\FindReplaceWindow。開いていれば前に出す）。 */
+function openFindWindow() {
+  send({ cmd: 'openFind' });
+}
 
 // ---- コマンド ---------------------------------------------------------------
 /**
@@ -838,6 +955,50 @@ function doSave(a_saveAs) {
   send({ cmd: 'save', markdown: result.text, saveAs: !!a_saveAs || !state.path, images: editor.collectImageSources() });
 }
 
+/** PDF に書き出し中か（書き出しが終わるまで、次の書き出しを受け付けない）。 */
+let exportingPdf = false;
+
+/**
+ * PDF に書き出す（mde のメニュー「PDFに書き出し…」）。今の内容（ソースモードなら入力欄の内容）を印刷用の要素
+ * （#print-doc。見た目は app.css の @media print）に表示し、画像を読み終えてから、ホストに書き出してもらう
+ * （保存先を選ぶダイアログ・A4・余白はホストが行う。Program.cs の ExportPdfAsync）。終わると pdfExported が届く。
+ */
+async function doExportPdf() {
+  if (exportingPdf) return;
+  const printDoc = $('print-doc');
+  const markdown = currentMarkdown();
+  printDoc.innerHTML = markdown ? parseBlocks(markdown).map(renderBlock).join('') : '';
+  for (const box of printDoc.querySelectorAll('input')) box.disabled = true;
+  linkPrintHeadings(printDoc);
+  if (!host) {
+    window.print(); // ブラウザ単体（動作確認用）
+    printDoc.replaceChildren();
+    return;
+  }
+  exportingPdf = true;
+  await Promise.all([...printDoc.querySelectorAll('img')].map((img) => (img.complete ? null : new Promise((resolve) => {
+    img.addEventListener('load', resolve, { once: true });
+    img.addEventListener('error', resolve, { once: true });
+  }))));
+  send({ cmd: 'exportPdf', name: state.name });
+}
+
+/**
+ * 印刷用の文書の「#見出し」のリンクを、PDF の中で見出しへ移動できるようにする。リンク先の見出しに id を付け、
+ * リンクをその id にする（Chromium が PDF の中の移動先を作る。編集画面と同じく findHeading で見出しを探す）。
+ * リンク先の見出しが無いリンクはそのまま。
+ * @param {HTMLElement} a_printDoc 印刷用の文書（#print-doc）
+ */
+function linkPrintHeadings(a_printDoc) {
+  const headings = [...a_printDoc.querySelectorAll(':scope > :is(h1, h2, h3, h4, h5, h6)')];
+  for (const a of a_printDoc.querySelectorAll('a[href^="#"]')) {
+    const h = findHeading(headings, a.getAttribute('href').slice(1));
+    if (!h) continue;
+    if (!h.id) h.id = `mdew-heading-${headings.indexOf(h) + 1}`;
+    a.setAttribute('href', `#${h.id}`);
+  }
+}
+
 /** メニューのボタン（data-cmd 属性）とコマンドの対応。 */
 const commands = {
   new: doNew,
@@ -846,7 +1007,11 @@ const commands = {
   saveAs: () => doSave(true),
   openFolder: doOpenFolder,
   saveAll: doSaveAll,
-  find: () => findPanel.open(),
+  find: openFindWindow,
+  exportPdf: doExportPdf,
+  pdfMargin: () => send({ cmd: 'pdfMargin' }), // 余白の設定（ホスト側の dialog\PdfMarginDialog）
+  clearRecent: () => send({ cmd: 'clearRecent' }),
+  close: () => send({ cmd: 'close' }), // このウィンドウを閉じる（保存していない変更があれば、ホストが確認する）
   toggleFolder: () => document.body.classList.toggle('no-folderpane'),
   toggleOutline: () => togglePane('no-outline'),
   toggleStatusbar: () => togglePane('no-statusbar'),
@@ -954,9 +1119,21 @@ const MENUS = {
       { label: '開く', key: 'Ctrl+O', cmd: 'open' },
       { label: 'フォルダを開く...', cmd: 'openFolder' },
       null,
+      // 最近使ったファイル（mde のサブメニューの代わりに、見出しを付けて並べる。パスはフルパス）
+      { label: '最近使ったファイル', heading: true },
+      ...(state.recentFiles.length
+        ? state.recentFiles.map((p) => ({ label: p, title: p, run: () => openRecent(p) }))
+        : [{ label: '（履歴なし）', disabled: true }]),
+      { label: '履歴をクリア', cmd: 'clearRecent', disabled: !state.recentFiles.length },
+      null,
       { label: '保存', key: 'Ctrl+S', cmd: 'save' },
       { label: '名前を付けて保存', key: 'Ctrl+Shift+S', cmd: 'saveAs' },
       { label: 'すべて保存', cmd: 'saveAll' },
+      null,
+      { label: 'PDFに書き出し…', key: 'Ctrl+P', cmd: 'exportPdf' },
+      { label: 'PDFの余白を設定…', cmd: 'pdfMargin' },
+      null,
+      { label: '閉じる', key: 'Ctrl+W', cmd: 'close' },
     ],
   },
   view: {
@@ -994,7 +1171,7 @@ let menuWasOpen = false;
 function showBarMenu(a_name) {
   const def = MENUS[a_name];
   const rect = def.button.getBoundingClientRect();
-  showMenu(rect.left, rect.bottom + 2, def.items(), (a_item) => commands[a_item.cmd]());
+  showMenu(rect.left, rect.bottom + 2, def.items(), (a_item) => (a_item.run ? a_item.run() : commands[a_item.cmd]()));
   openMenuName = a_name;
   // メニューが閉じた（項目を選んだ・外をクリックした・Esc）ことを、メニューの要素が無くなったことで知る
   const menu = document.querySelector('.md-menu');
@@ -1025,7 +1202,8 @@ for (const [name, def] of Object.entries(MENUS)) {
   });
 }
 
-// ショートカット：Ctrl+S 保存、Ctrl+Shift+S 名前を付けて保存、Ctrl+O 開く、Ctrl+N 新規、F12 開発者ツール、
+// ショートカット：Ctrl+S 保存、Ctrl+Shift+S 名前を付けて保存、Ctrl+O 開く、Ctrl+N 新規、Ctrl+F 検索と置換、
+// Ctrl+P PDFに書き出し、Ctrl+W 閉じる、F12 開発者ツール、
 // Alt+F「ファイル」・Alt+V「表示」のメニュー
 window.addEventListener('keydown', (e) => {
   if (e.altKey && !e.ctrlKey && !e.shiftKey) {
@@ -1045,7 +1223,9 @@ window.addEventListener('keydown', (e) => {
   if ('s' === k) { e.preventDefault(); doSave(e.shiftKey); }
   else if ('o' === k) { e.preventDefault(); doOpen(); }
   else if ('n' === k) { e.preventDefault(); doNew(); }
-  else if ('f' === k && !e.shiftKey) { e.preventDefault(); findPanel.open(); }
+  else if ('f' === k && !e.shiftKey) { e.preventDefault(); openFindWindow(); }
+  else if ('p' === k && !e.shiftKey) { e.preventDefault(); doExportPdf(); }
+  else if ('w' === k && !e.shiftKey) { e.preventDefault(); commands.close(); }
 });
 
 /**
@@ -1105,7 +1285,7 @@ if (host) {
       updateTitle();
       syncDirtyToHost();
       folderView.setCurrent(msg.path);
-      findPanel.onDocumentLoaded();
+      findEngine.onDocumentLoaded();
       resolveOpenWaiter(msg.path, true);
     } else if ('folderOpened' === msg.cmd) {
       // フォルダを開いた（保存していない変更は、確認の上で破棄する。この後、開くファイルの load が届く）
@@ -1116,7 +1296,9 @@ if (host) {
       document.body.classList.remove('no-folderpane');
       $('folder-title').title = msg.root;
       folderView.open(msg.root, msg.name);
-      findPanel.updateScope();
+    } else if ('findCommand' === msg.cmd) {
+      // 検索と置換のウィンドウのボタンが押された（find.js の handle）
+      findEngine.handle(msg);
     } else if ('dirList' === msg.cmd) {
       const waiters = dirListWaiters.get(pathKey(msg.path)) || [];
       dirListWaiters.delete(pathKey(msg.path));
@@ -1185,7 +1367,20 @@ if (host) {
       editor.focus();
     } else if ('init' === msg.cmd) {
       // 起動直後：ホストの設定。Debug ビルドの時は、停止・入力遅延の回数を数えて表示する
+      state.tempDir = msg.tempDir || null;
       if (msg.debug) startStallMonitor();
+    } else if ('imagesImported' === msg.cmd) {
+      // 他のアプリの画像を、一時フォルダへコピーし終えた（importImages）
+      const resolve = importWaiters.get(msg.id);
+      importWaiters.delete(msg.id);
+      if (resolve) resolve(msg.urls || []);
+    } else if ('recentFiles' === msg.cmd) {
+      // 最近使ったファイルの一覧（開いた・保存した時、ウィンドウが手前に来た時に届く）
+      state.recentFiles = msg.files || [];
+    } else if ('pdfExported' === msg.cmd) {
+      // PDF に書き出し終わった（キャンセルした場合も）。印刷用の要素を空にする
+      exportingPdf = false;
+      $('print-doc').replaceChildren();
     }
   });
 } else {
@@ -1240,6 +1435,8 @@ function startStallMonitor() {
 window.__mdeTest = {
   load: (a_md) => loadDocument(a_md),
   get: () => currentMarkdown(),
+  find: (a_msg) => findEngine.handle(a_msg),
+  findUpdates,
   editor,
 };
 

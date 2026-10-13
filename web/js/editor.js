@@ -10,8 +10,14 @@
 //  - 入力時の書式変換：行頭の「# 」「- 」「1. 」「> 」「[ ] 」、閉じ側の「**」「*」「~~」「==」「`」を
 //    打った時に、見た目の書式に変換する（IME で変換中は何もしない）。
 //  - 右クリックのメニュー：切り取り・コピー・貼り付け、文字の書式、表の操作（showMenu で自前のメニューを出す）。
-//  - 貼り付け：文字は Markdown として読み、書式にして貼る（Ctrl+Shift+V は書式なし）。
-import { parseBlocks, renderBlock, renderInline, serializeBlock } from './markdown.js';
+//  - 貼り付け：文字は Markdown として読み、書式にして貼る（Ctrl+Shift+V は書式なし）。Excel 等の表は表にして貼る。
+//  - コピー：他のアプリ向けの HTML と、mdew どうしで書式を保つ Markdown も一緒にコピーする（clipboard.js）。
+//  - 画像：ダブルクリック・右クリックの「画像を開く」で、既定のアプリで開く（ホストが開く）。
+import { parseBlocks, renderBlock, renderInline, serializeBlock, imageSource } from './markdown.js';
+import {
+  MARKDOWN_MIME, setClipboardData, writeClipboard, lastCopiedMarkdown, buildCopyData, buildExcelCopy, buildTableCopy,
+  tableFromHtml, tableFromTsv, rowsToMarkdownTable, imageSourcesInRows, cellMarkdown,
+} from './clipboard.js';
 
 /** 文字を書く単位の要素（カーソルのある「行」を探す時に使う）。 */
 const TEXT_BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,pre,td,th,div.md-raw';
@@ -33,6 +39,11 @@ export class Editor {
    * @param {(href: string) => void} a_handlers.onOpenLink リンクがクリックされた
    * @param {(href: string|null) => void} a_handlers.onHoverLink リンクの上にマウスが乗った（離れたら null）
    * @param {(message: string) => void} a_handlers.onError 利用者に知らせるエラー
+   * @param {(src: string) => void} a_handlers.onOpenImage 画像を既定のアプリで開く（書かれたままの参照先）
+   * @param {(img: HTMLImageElement) => string|null} a_handlers.imageFileUrl 画像のファイルの場所（file:///…・
+   *   http…。他のアプリへのコピー用。分からなければ null）
+   * @param {(srcs: string[]) => Promise<(string|null)[]>} a_handlers.importImages 他のアプリが置いた画像のファイル
+   *   （Excel の一時ファイル等）を、貼り付けた画像としてホストにコピーしてもらう（URL を返す。コピーできなければ null）
    */
   constructor(a_root, a_handlers) {
     this.m_root = a_root;
@@ -77,6 +88,15 @@ export class Editor {
       setTimeout(() => this.applyInputRules(), 0);
     });
     a_root.addEventListener('paste', (e) => this.onPaste(e));
+    a_root.addEventListener('copy', (e) => this.onCopy(e, false));
+    a_root.addEventListener('cut', (e) => this.onCopy(e, true));
+    // 画像のダブルクリック：既定のアプリで開く（mde と同じ）
+    a_root.addEventListener('dblclick', (e) => {
+      if ('IMG' === e.target.tagName && this.m_root.contains(e.target)) {
+        e.preventDefault();
+        this.m_handlers.onOpenImage(imageSource(e.target));
+      }
+    });
     // リンクを開くのは、マウスを押した位置から動かさずに離した時だけ（ドラッグでの選択と区別する。onClick 参照）
     a_root.addEventListener('mousedown', (e) => { this.m_mouseDown = { x: e.clientX, y: e.clientY }; });
     a_root.addEventListener('click', (e) => this.onClick(e));
@@ -180,7 +200,7 @@ export class Editor {
    * @returns {string[]} img の src 属性の値（重複なし。書かれたままの相対パス・URL）
    */
   collectImageSources() {
-    return [...new Set([...this.m_root.querySelectorAll('img')].map((img) => img.getAttribute('src')).filter(Boolean))];
+    return [...new Set([...this.m_root.querySelectorAll('img')].map((img) => imageSource(img)).filter(Boolean))];
   }
 
   /**
@@ -190,8 +210,13 @@ export class Editor {
   applyImageSrcReplacements(a_replacements) {
     if (!a_replacements) return;
     for (const img of this.m_root.querySelectorAll('img')) {
-      const src = img.getAttribute('src');
-      if (Object.prototype.hasOwnProperty.call(a_replacements, src)) img.setAttribute('src', a_replacements[src]);
+      const src = imageSource(img);
+      if (!Object.prototype.hasOwnProperty.call(a_replacements, src)) continue;
+      const next = a_replacements[src];
+      img.removeAttribute('data-src');
+      img.setAttribute('src', next);
+      // HTML のタグで書かれていた画像は、書き出すタグの中の参照先も書き換える（ホストの ReplaceImageReference と同じ）
+      if (img.dataset.html) img.dataset.html = img.dataset.html.split(`src="${src}"`).join(`src="${next}"`).split(`src='${src}'`).join(`src='${next}'`);
     }
   }
 
@@ -1036,13 +1061,19 @@ export class Editor {
     e.preventDefault();
     const sel = getSelection();
     const hasSelection = sel.rangeCount > 0 && !sel.isCollapsed && this.m_root.contains(sel.anchorNode);
-    const items = [
+    const items = [];
+    if ('IMG' === e.target.tagName) {
+      const src = imageSource(e.target);
+      items.push({ label: '画像を開く', run: () => this.m_handlers.onOpenImage(src) }, null);
+    }
+    items.push(
       { label: '切り取り', key: 'Ctrl+X', disabled: !hasSelection, run: () => document.execCommand('cut') },
       { label: 'コピー', key: 'Ctrl+C', disabled: !hasSelection, run: () => document.execCommand('copy') },
+      { label: 'Excel用にコピー', disabled: !hasSelection, run: () => this.copyForExcel() },
       { label: '貼り付け', key: 'Ctrl+V', run: () => this.pasteFromClipboard(false) },
       { label: '書式なしで貼り付け', key: 'Ctrl+Shift+V', run: () => this.pasteFromClipboard(true) },
       null,
-    ];
+    );
     for (const name of Object.keys(FORMATS)) {
       const state = this.formatState(name);
       items.push({ label: FORMATS[name].label, key: FORMATS[name].key, checked: state.active, disabled: !state.enabled,
@@ -1066,6 +1097,7 @@ export class Editor {
         { label: '右に列を挿入', run: table(() => this.insertColumn(cell, true)) },
         { label: '列を削除', run: table(() => this.deleteColumn(cell)) },
         null,
+        { label: '表をコピー', run: () => writeClipboard(buildTableCopy(cell.closest('table'), this.m_handlers.imageFileUrl)) },
         { label: '表を削除', run: table(() => this.deleteTable(cell)) },
       );
     }
@@ -1292,7 +1324,119 @@ export class Editor {
     const plain = this.m_pastePlain;
     this.m_pastePlain = false;
     const image = [...data.files].find((f) => f.type.startsWith('image/'));
-    this.pasteContent(data.getData('text/plain') || '', image || null, plain);
+    this.pasteData({
+      text: data.getData('text/plain') || '',
+      html: data.getData('text/html') || '',
+      markdown: data.getData(MARKDOWN_MIME) || null,
+      image: image || null,
+    }, plain);
+  }
+
+  /**
+   * クリップボードの内容を、形式に合わせて貼り付ける。
+   *  - mdew でコピーした内容：一緒にコピーした Markdown を、書式にして貼る（見出し・表等もそのまま）
+   *  - Excel 等の表（表だけの HTML・タブ区切りの文字）：Markdown の表にして貼る（mde と同じ。表のセルの中と、
+   *    コードブロックの中では文字のまま）
+   *  - それ以外：pasteContent（文字は Markdown として読む。画像だけならホストに保存を依頼する）
+   * @param {{text:string, html:string, markdown:string|null, image:File|null}} a_data クリップボードの内容
+   * @param {boolean} a_plain 書式なしで貼り付けるか
+   */
+  pasteData(a_data, a_plain) {
+    const text = a_data.text || '';
+    const block = this.currentTextBlock();
+    const tag = block ? block.tagName : '';
+    const inCode = block && ('PRE' === tag || block.classList.contains('md-raw'));
+    const inCell = 'TD' === tag || 'TH' === tag;
+    if (a_plain || inCode || (a_data.image && '' === text.trim())) {
+      this.pasteContent(text, a_data.image, a_plain);
+      return;
+    }
+    const markdown = a_data.markdown ?? lastCopiedMarkdown(text);
+    if (null != markdown && '' !== markdown) {
+      this.pasteContent(markdown, null, false);
+      return;
+    }
+    const htmlRows = tableFromHtml(a_data.html);
+    const rows = htmlRows || (inCell ? null : tableFromTsv(text));
+    if (rows && block) {
+      const srcs = imageSourcesInRows(rows);
+      if (srcs.length) {
+        // Excel の範囲の中の画像：ホストに一時フォルダへコピーしてもらってから貼る（貼る位置は今のカーソル位置）
+        const sel = getSelection();
+        const range = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+        this.m_handlers.importImages(srcs).then((a_urls) => {
+          const urls = new Map(srcs.map((src, k) => [src, a_urls[k]]).filter(([, u]) => u));
+          if (range && this.m_root.contains(range.startContainer)) {
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          this.pasteTable(rows, text, urls, inCell);
+        });
+        return;
+      }
+      if (!inCell) {
+        this.pasteTable(rows, text, null, false);
+        return;
+      }
+    }
+    this.pasteContent(text, a_data.image, a_plain);
+  }
+
+  /**
+   * Excel 等の表を、カーソル位置に Markdown の表として貼る（1つのセルだけの場合と、表のセルの中に貼る場合は、
+   * セルの文字と画像を段落の中に貼る）。
+   * @param {({text:string, images?:object[]}|string)[][]} a_rows セル（clipboard.js の tableFromHtml・tableFromTsv）
+   * @param {string} a_text クリップボードの文字（表を置けない場所では、これを文字のまま貼る）
+   * @param {Map<string,string>|null} a_urls 画像の参照先 → 貼り付けた画像の URL
+   * @param {boolean} a_inCell カーソルが表のセルの中か
+   */
+  pasteTable(a_rows, a_text, a_urls, a_inCell) {
+    const block = this.currentTextBlock();
+    if (!block) return;
+    this.checkpoint('edit');
+    const single = 1 === a_rows.length && 1 === a_rows[0].length;
+    if (single || a_inCell) {
+      // 1つのセル・表のセルの中：セルの内容を並べて、段落（セル）の中に貼る
+      const inline = a_rows.map((r) => r.map((c) => cellMarkdown(c, a_urls)).filter(Boolean).join(' ')).join(a_inCell ? ' ' : '\n');
+      this.insertInlineMarkdown(a_inCell ? inline.replace(/\n/g, '<br>') : inline);
+    } else if (!this.pasteMarkdown(rowsToMarkdownTable(a_rows, a_urls), block)) {
+      // 引用の中等、表を置けない場所では文字のまま貼る
+      a_text.replace(/\r\n?/g, '\n').split('\n').forEach((line, k) => {
+        if (k > 0) document.execCommand('insertParagraph');
+        if (line) document.execCommand('insertText', false, line);
+      });
+    }
+    this.changed();
+  }
+
+  /**
+   * コピー・切り取り（Ctrl+C・Ctrl+X・右クリックのメニュー）。文字に加えて、他のアプリ向けの HTML と、
+   * mdew どうしで書式を保つ Markdown もコピーする（clipboard.js の buildCopyData）。
+   * @param {ClipboardEvent} e
+   * @param {boolean} a_cut 切り取りか（コピーした後に、選んだ範囲を消す）
+   */
+  onCopy(e, a_cut) {
+    const sel = getSelection();
+    if (!e.clipboardData || !sel.rangeCount || sel.isCollapsed || !this.m_root.contains(sel.anchorNode)) return;
+    e.preventDefault();
+    setClipboardData(e.clipboardData, buildCopyData(sel, this.m_root, { bullet: this.m_bullet }, this.m_handlers.imageFileUrl));
+    if (a_cut) {
+      this.checkpoint('edit');
+      document.execCommand('delete');
+      this.changed();
+    }
+  }
+
+  /**
+   * 右クリックの「Excel用にコピー」（mde と同じ。clipboard.js の buildExcelCopy）。段落の中の一部だけを
+   * 選んでいる場合は、通常のコピーをする。
+   */
+  copyForExcel() {
+    const sel = getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) return;
+    const data = buildExcelCopy(sel.getRangeAt(0), this.m_root, this.m_handlers.imageFileUrl);
+    if (data) writeClipboard(data);
+    else document.execCommand('copy');
   }
 
   /**
@@ -1303,10 +1447,12 @@ export class Editor {
    */
   async pasteFromClipboard(a_plain) {
     let text = '';
+    let html = '';
     let image = null;
     try {
       for (const item of await navigator.clipboard.read()) {
         if (!text && item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text();
+        if (!html && item.types.includes('text/html')) html = await (await item.getType('text/html')).text();
         const type = item.types.find((t) => t.startsWith('image/'));
         if (!image && type) image = new File([await item.getType(type)], 'image.png', { type });
       }
@@ -1315,7 +1461,7 @@ export class Editor {
       return;
     }
     this.focus();
-    this.pasteContent(text, image, a_plain);
+    this.pasteData({ text, html, markdown: null, image }, a_plain);
   }
 
   /**
@@ -1603,7 +1749,10 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     const check = button.appendChild(document.createElement('span'));
     check.className = 'check';
     check.textContent = item.checked ? '✓' : '';
-    button.appendChild(document.createElement('span')).textContent = item.label;
+    const label = button.appendChild(document.createElement('span'));
+    label.className = 'label';
+    label.textContent = item.label;
+    if (item.title) button.title = item.title;
     const key = button.appendChild(document.createElement('span'));
     key.className = 'key';
     key.textContent = item.key || '';

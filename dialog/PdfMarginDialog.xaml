@@ -1,0 +1,44 @@
+<!-- PDF の余白の設定（mde の dialog\PdfMarginDialog と同じ見た目・項目）。
+     メニュー「ファイル」→「PDFの余白を設定…」から開く（MainWindow.ShowPdfMarginDialog 参照）。 -->
+<Window x:Class="mdew.dialog.PdfMarginDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PDFの余白を設定"
+        Width="360"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        FontFamily="Segoe UI, Yu Gothic UI"
+        FontSize="13"
+        Background="#FFFFFF">
+    <Window.Resources>
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Foreground" Value="#555555"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="22">
+        <TextBlock Text="PDFに書き出す際の、上下左右の余白（px）を設定してください" Margin="0,0,0,16"
+                   Foreground="#1C1C1C" FontWeight="Bold" TextWrapping="Wrap"/>
+
+        <TextBlock Text="上の余白" Style="{StaticResource Caption}"/>
+        <TextBox x:Name="m_topBox" Margin="0,0,0,14" Padding="6,4"/>
+
+        <TextBlock Text="下の余白" Style="{StaticResource Caption}"/>
+        <TextBox x:Name="m_bottomBox" Margin="0,0,0,14" Padding="6,4"/>
+
+        <TextBlock Text="左の余白" Style="{StaticResource Caption}"/>
+        <TextBox x:Name="m_leftBox" Margin="0,0,0,14" Padding="6,4"/>
+
+        <TextBlock Text="右の余白" Style="{StaticResource Caption}"/>
+        <TextBox x:Name="m_rightBox" Margin="0,0,0,22" Padding="6,4"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="既定値に戻す" Width="100" Height="30" Margin="0,0,8,0" Click="ResetClick"/>
+            <Button Content="キャンセル" Width="84" Height="30" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="OK" Width="84" Height="30" IsDefault="True" Click="OkClick"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
