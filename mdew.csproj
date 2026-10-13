@@ -28,7 +28,7 @@
   <ItemGroup>
     <!-- 画面側（HTML・JavaScript・CSS）は、ビルドせずにそのまま実行フォルダの web へコピーする -->
     <Content Include="web\**" CopyToOutputDirectory="PreserveNewest" />
-    <!-- サードパーティのライセンス表示。実行フォルダへコピーし、バージョン情報のウィンドウから開く。
+    <!-- サードパーティのライセンス表示。実行フォルダへコピーする。
          NuGet のパッケージを追加・更新した時は、この中のバージョン・ライセンス文も直す -->
     <Content Include="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

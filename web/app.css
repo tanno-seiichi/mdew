@@ -2,25 +2,6 @@
 /* ===== フォント・文字の大きさ（ここを書き換えて試せます） =====
    フォントは左から順に、PC に入っているものが使われます（日本語が無いフォントの場合、日本語の文字だけ
    次のフォントで表示されます）。フォント名に空白を含む場合は ' ' で囲みます。 */
-/* オリジナルスタイル
-:root {
-  --ui-font: 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', sans-serif;
-  --doc-font: 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Segoe UI', sans-serif;
-  --doc-font-size: 16px;
-  --doc-line-height: 1.75;
-  --code-font: Consolas, 'Yu Gothic UI', monospace;
-  --code-font-size: 0.92em;
-  --code-block-font-size: 14px;
-  --code-block-line-height: 1.5;
-  --line: #dddfe2;
-  --pane-bg: #f6f7f9;
-  --code-bg: #ece8dc;
-  --code-block-bg: #ece8dc;
-  --code-border: transparent;
-  --code-text: #333333;
-  --text: #1c1c1c;
-}
-*/
 /* Typoraスタイル */
 :root {
   --ui-font: 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', sans-serif;
@@ -54,7 +35,6 @@ body { font-family: var(--ui-font); background: #ffffff; color: var(--text); }
   background: transparent; cursor: pointer;
 }
 #menubar button:hover { background: #e6e8eb; border-color: var(--line); }
-#menubar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
 
 #body { flex: 1; display: flex; min-height: 0; }
 #outline {
