@@ -2,6 +2,9 @@
 
 （2026-10-11 記録、2026-10-14 更新）
 
+mdeweb の ari 版（`Documents\mdeweb`、Milkdown を使ったもの）は、2026-10-14 で更新を終えた（mdew の完成度が
+上がったため）。今後は mdew だけを更新する。
+
 ## mde にできて mdew でまだできないこと
 
 mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの。
@@ -153,3 +156,16 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
     英数字だけの名前で一時フォルダへコピーしてから参照させる
   - Excel から：コピーした範囲の画像（Excel の一時ファイル）を、貼り付けた画像の一時フォルダへコピーして、表のセルに
     `<img src="…" width="…">` で入れる（保存すると「<ファイル名>.images」へ移る。Program.cs の ImportImages）
+- [x] **最近使ったファイルのサブメニュー・README の書き換え・mde のコードの見た目**（2026-10-14）
+  - 「ファイル」→「最近使ったファイル」を、mde と同じサブメニューにした（パスはフルパス。`editor.js` の showMenu に
+    サブメニューの機能を加えた。項目にマウスを乗せると右側に開き、Esc でサブメニューだけを閉じる）
+  - それまでの README.md（開発者向けの内容）を `doc\DESIGN.md` に移し、README.md を mde と同じく、初めて使う方向けの
+    ユーザーズガイドに書き換えた
+  - mde（ari 版・nashi 版）のインラインコード・コードブロックの見た目を mdew に合わせた（背景 #F3F4F4、枠線 #E7EAED、
+    フォント Consolas・Meiryo、コードブロック 14px・インラインコード 14.72px、コードブロックの余白 16×8px）。
+    WPF の Run には枠線を付けられないため、mde のインラインコードには枠線が付かない
+- [x] **最近使ったフォルダ・mde のインラインコードの色**（2026-10-14）
+  - 「ファイル」→「最近使ったフォルダ」を、「最近使ったファイル」の下に追加した（サブメニュー。フルパスで 10 個まで。
+    「フォルダを開く...」・起動時の引数で開いたフォルダを覚える。一覧は settings.json の RecentFolders）
+  - mde（ari 版・nashi 版）のインラインコードは枠線が無く見分けにくいため、背景色だけ mde の元の色（#ECE8DC）に戻した
+    （BlockStyles.InlineCodeBackgroundBrush。一度 #E3E6EA を試したが、元の色に戻した）

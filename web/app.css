@@ -195,7 +195,7 @@ body.find-selected #doc ::selection, body.find-selected #source::selection { bac
 .md-menu button .check { width: 18px; flex: none; text-align: center; color: #0b62c4; }
 .md-menu button .key { margin-left: auto; padding-left: 28px; color: #888; font-size: 12px; }
 .md-menu button:disabled .key { color: #bbb; }
-.md-menu button:hover:not(:disabled) { background: #e8f0fe; }
+.md-menu button:hover:not(:disabled), .md-menu button.submenu-open { background: #e8f0fe; }
 .md-menu button:disabled { color: #aaa; cursor: default; }
 .md-menu hr { border: none; border-top: 1px solid #e3e5e8; margin: 4px 0; }
 .md-menu .heading { padding: 4px 16px 2px 10px; color: #888; font-size: 12px; cursor: default; } /* 選べない見出し */

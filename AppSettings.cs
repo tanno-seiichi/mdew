@@ -30,6 +30,9 @@ namespace mdew
         /// <summary>最近使ったファイル（フルパス。先頭が最新。メニュー「ファイル」→「最近使ったファイル」）。</summary>
         public System.Collections.Generic.List<string> RecentFiles { get; set; } = new System.Collections.Generic.List<string>();
 
+        /// <summary>最近使ったフォルダ（フルパス。先頭が最新。メニュー「ファイル」→「最近使ったフォルダ」）。</summary>
+        public System.Collections.Generic.List<string> RecentFolders { get; set; } = new System.Collections.Generic.List<string>();
+
         /// <summary>設定ファイルのパス。</summary>
         private static readonly string s_path = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "settings.json");
@@ -47,6 +50,7 @@ namespace mdew
                 {
                     var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(s_path)) ?? new AppSettings();
                     settings.RecentFiles ??= new System.Collections.Generic.List<string>();
+                    settings.RecentFolders ??= new System.Collections.Generic.List<string>();
                     return settings;
                 }
             }

@@ -275,6 +275,14 @@ namespace mdew
                 case "clearRecent":
                     ClearRecentFiles();
                     break;
+                case "openRecentFolder":
+                    OpenRecentFolder(root.GetProperty("path").GetString(),
+                        root.TryGetProperty("relPath", out JsonElement recentRel) && JsonValueKind.String == recentRel.ValueKind
+                            ? recentRel.GetString() : null);
+                    break;
+                case "clearRecentFolders":
+                    ClearRecentFolders();
+                    break;
                 case "close":
                     // メニュー「閉じる」（Ctrl+W）：このウィンドウを閉じる（保存していない変更があれば OnClosing で確認する）
                     Close();
@@ -415,11 +423,62 @@ namespace mdew
         /// <summary>最近使ったファイルとして覚えておく数（mde と同じ）。</summary>
         private const int MAX_RECENT_FILES = 10;
 
-        /// <summary>最近使ったファイルの一覧を HTML 側へ送る（recentFiles。メニューを開いた時に表示する）。</summary>
+        /// <summary>最近使ったファイル・フォルダの一覧を HTML 側へ送る（recentFiles。メニューを開いた時に表示する）。</summary>
         /// <param name="a_settings">設定（一覧を持つもの）。</param>
         private void PostRecentFiles(AppSettings a_settings)
         {
-            Post(new { cmd = "recentFiles", files = a_settings.RecentFiles });
+            Post(new { cmd = "recentFiles", files = a_settings.RecentFiles, folders = a_settings.RecentFolders });
+        }
+
+        /// <summary>開いたフォルダを、最近使ったフォルダの先頭に加える（AddRecentFile と同じ。10 個まで）。</summary>
+        /// <param name="a_folder">フォルダのパス。</param>
+        private void AddRecentFolder(string a_folder)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(a_folder);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            var settings = AppSettings.Load();
+            settings.RecentFolders.RemoveAll(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase));
+            settings.RecentFolders.Insert(0, full);
+            if (settings.RecentFolders.Count > MAX_RECENT_FILES)
+            {
+                settings.RecentFolders.RemoveRange(MAX_RECENT_FILES, settings.RecentFolders.Count - MAX_RECENT_FILES);
+            }
+            settings.Save();
+            PostRecentFiles(settings);
+        }
+
+        /// <summary>最近使ったフォルダを開く（「フォルダを開く...」でそのフォルダを選んだのと同じ）。フォルダが無い
+        /// （移動・削除された）場合は、そのことを知らせて一覧から消す。保存していない変更の確認は、HTML 側で済ませている。</summary>
+        /// <param name="a_folder">フォルダのパス。</param>
+        /// <param name="a_relPath">今のファイルの、今のフォルダからの相対パス（OpenFolder と同じ。無ければ null）。</param>
+        private void OpenRecentFolder(string a_folder, string a_relPath)
+        {
+            if (Directory.Exists(a_folder))
+            {
+                OpenFolderPath(a_folder, a_relPath);
+                return;
+            }
+            var settings = AppSettings.Load();
+            settings.RecentFolders.RemoveAll(p => string.Equals(p, a_folder, StringComparison.OrdinalIgnoreCase));
+            settings.Save();
+            PostRecentFiles(settings);
+            Post(new { cmd = "error", message = $"フォルダが見つかりませんでした。\n{a_folder}" });
+        }
+
+        /// <summary>最近使ったフォルダの「履歴をクリア」：一覧を空にする。</summary>
+        private void ClearRecentFolders()
+        {
+            var settings = AppSettings.Load();
+            settings.RecentFolders.Clear();
+            settings.Save();
+            PostRecentFiles(settings);
         }
 
         /// <summary>開いた・保存したファイルを、最近使ったファイルの先頭に加える（既にあれば先頭へ移す。
@@ -750,6 +809,7 @@ namespace mdew
             m_folderOpen = true;
             m_findWindow?.SetFolderAvailable(true);
             Post(new { cmd = "folderOpened", root = folder, name = string.IsNullOrEmpty(name) ? folder : name });
+            AddRecentFolder(folder);
             string open = null;
             if (!string.IsNullOrEmpty(a_relPath))
             {

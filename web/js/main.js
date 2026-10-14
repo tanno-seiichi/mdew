@@ -8,7 +8,8 @@
 //                {cmd:'readFolderFiles', reqId, root} / {cmd:'saveAll', files:[{path, markdown, images, current}]} /
 //                {cmd:'openFind'} / {cmd:'findUpdate', status | results, selectedIndex | step} /
 //                {cmd:'openImage', src} / {cmd:'exportPdf', name} / {cmd:'pdfMargin'} /
-//                {cmd:'openRecent', path} / {cmd:'clearRecent'} / {cmd:'close'} /
+//                {cmd:'openRecent', path} / {cmd:'clearRecent'} / {cmd:'openRecentFolder', path, relPath} /
+//                {cmd:'clearRecentFolders'} / {cmd:'close'} /
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
@@ -16,7 +17,7 @@
 //                {cmd:'folderOpened', root, name} / {cmd:'dirList', path, dirs, files} /
 //                {cmd:'folderFiles', reqId, files:[{path, text}]} / {cmd:'savedAll', saved, failed:[{path, message}]} /
 //                {cmd:'findCommand', action, query, replacement, folder, matchCase, regex, index} /
-//                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files} / {cmd:'imagesImported', id, urls}
+//                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls}
 import { Editor, showMenu } from './editor.js';
 import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
@@ -43,6 +44,7 @@ const state = {
   sourceMode: false, // ソースモード（Markdown のソースを直接編集する）か。終了時には覚えない
   tempDir: null, // 貼り付けた画像の一時フォルダ（ホストから init で届く。他のアプリへのコピーで使う）
   recentFiles: [], // 最近使ったファイル（フルパス。先頭が最新。ホストから recentFiles で届く）
+  recentFolders: [], // 最近使ったフォルダ（フルパス。先頭が最新。ホストから recentFiles で届く）
 };
 
 /**
@@ -533,6 +535,16 @@ function openRecent(a_path) {
   send({ cmd: 'openRecent', path: a_path });
 }
 
+/**
+ * メニュー「ファイル」→「最近使ったフォルダ」の項目：そのフォルダを開く（「フォルダを開く...」と同じく、保存していない
+ * 変更があれば確認する）。フォルダが無い場合は、ホストが知らせて一覧から消す。
+ * @param {string} a_path フォルダのフルパス
+ */
+function openRecentFolder(a_path) {
+  if (hasUnsaved() && !confirm('保存されていない変更があります。破棄して別のフォルダを開きますか？')) return;
+  send({ cmd: 'openRecentFolder', path: a_path, relPath: folderView.relativePath(state.path) });
+}
+
 /** メニュー「ファイル」→「フォルダを開く...」：保存していない変更があれば確認してから、フォルダを選ぶダイアログを出してもらう。 */
 function doOpenFolder() {
   if (hasUnsaved() && !confirm('保存されていない変更があります。破棄して別のフォルダを開きますか？')) return;
@@ -1011,6 +1023,7 @@ const commands = {
   exportPdf: doExportPdf,
   pdfMargin: () => send({ cmd: 'pdfMargin' }), // 余白の設定（ホスト側の dialog\PdfMarginDialog）
   clearRecent: () => send({ cmd: 'clearRecent' }),
+  clearRecentFolders: () => send({ cmd: 'clearRecentFolders' }),
   close: () => send({ cmd: 'close' }), // このウィンドウを閉じる（保存していない変更があれば、ホストが確認する）
   toggleFolder: () => document.body.classList.toggle('no-folderpane'),
   toggleOutline: () => togglePane('no-outline'),
@@ -1117,14 +1130,23 @@ const MENUS = {
     items: () => [
       { label: '新規', key: 'Ctrl+N', cmd: 'new' },
       { label: '開く', key: 'Ctrl+O', cmd: 'open' },
+      // 最近使ったファイル（mde と同じくサブメニュー。パスはフルパスで表示する）
+      {
+        label: '最近使ったファイル',
+        submenu: state.recentFiles.length
+          ? [...state.recentFiles.map((p) => ({ label: p, title: p, run: () => openRecent(p) })), null,
+            { label: '履歴をクリア', cmd: 'clearRecent' }]
+          : [{ label: '（履歴なし）', disabled: true }],
+      },
+      // 最近使ったフォルダ（「フォルダを開く...」で開いたフォルダ。パスはフルパスで表示する）
+      {
+        label: '最近使ったフォルダ',
+        submenu: state.recentFolders.length
+          ? [...state.recentFolders.map((p) => ({ label: p, title: p, run: () => openRecentFolder(p) })), null,
+            { label: '履歴をクリア', cmd: 'clearRecentFolders' }]
+          : [{ label: '（履歴なし）', disabled: true }],
+      },
       { label: 'フォルダを開く...', cmd: 'openFolder' },
-      null,
-      // 最近使ったファイル（mde のサブメニューの代わりに、見出しを付けて並べる。パスはフルパス）
-      { label: '最近使ったファイル', heading: true },
-      ...(state.recentFiles.length
-        ? state.recentFiles.map((p) => ({ label: p, title: p, run: () => openRecent(p) }))
-        : [{ label: '（履歴なし）', disabled: true }]),
-      { label: '履歴をクリア', cmd: 'clearRecent', disabled: !state.recentFiles.length },
       null,
       { label: '保存', key: 'Ctrl+S', cmd: 'save' },
       { label: '名前を付けて保存', key: 'Ctrl+Shift+S', cmd: 'saveAs' },
@@ -1375,8 +1397,9 @@ if (host) {
       importWaiters.delete(msg.id);
       if (resolve) resolve(msg.urls || []);
     } else if ('recentFiles' === msg.cmd) {
-      // 最近使ったファイルの一覧（開いた・保存した時、ウィンドウが手前に来た時に届く）
+      // 最近使ったファイル・フォルダの一覧（開いた・保存した時、ウィンドウが手前に来た時に届く）
       state.recentFiles = msg.files || [];
+      state.recentFolders = msg.folders || [];
     } else if ('pdfExported' === msg.cmd) {
       // PDF に書き出し終わった（キャンセルした場合も）。印刷用の要素を空にする
       exportingPdf = false;

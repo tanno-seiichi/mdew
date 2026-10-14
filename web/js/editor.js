@@ -1724,56 +1724,116 @@ function detectBulletMarker(a_markdown) {
  * 右クリックのメニューを表示する（main.js の「ファイル」のメニューでも使う）。項目を選ぶか、メニューの外をクリックする・Esc キーで閉じる。
  * @param {number} a_x 表示する位置（画面の左上からの座標。画面からはみ出す場合は内側にずらす）
  * @param {number} a_y
- * @param {({label:string, key?:string, checked?:boolean, disabled?:boolean, heading?:boolean}|null)[]} a_items
+ * @param {({label:string, key?:string, checked?:boolean, disabled?:boolean, heading?:boolean, title?:string,
+ *   submenu?:object[]}|null)[]} a_items
  *   項目。null は区切り線。key はショートカットの表示、checked は項目の左にチェックの印を付ける（その書式になっている）、
- *   heading は選べない見出し（下の項目のまとまりの名前）
- * @param {(item:object)=>void} a_onSelect 項目が選ばれた時に呼ぶ関数（選ばれた項目を渡す）
+ *   heading は選べない見出し（下の項目のまとまりの名前）、title はマウスを乗せた時に出す説明、
+ *   submenu はサブメニューの項目（項目にマウスを乗せると右側に開く。項目の形は a_items と同じ）
+ * @param {(item:object)=>void} a_onSelect 項目が選ばれた時に呼ぶ関数（選ばれた項目を渡す。サブメニューの項目も同じ）
  */
 export function showMenu(a_x, a_y, a_items, a_onSelect) {
-  document.querySelector('.md-menu')?.remove();
-  const menu = document.createElement('div');
-  menu.className = 'md-menu';
-  for (const item of a_items) {
-    if (!item) {
-      menu.appendChild(document.createElement('hr'));
-      continue;
+  document.querySelectorAll('.md-menu').forEach((m) => m.remove());
+  /** 開いているサブメニュー（無ければ null）。 */
+  let sub = null;
+  const closeSub = () => {
+    if (sub) sub.remove();
+    sub = null;
+    document.querySelectorAll('.md-menu button.submenu-open').forEach((b) => b.classList.remove('submenu-open'));
+  };
+
+  /**
+   * メニューの要素を作る。
+   * @param {object[]} a_list 項目
+   * @param {boolean} a_isSub サブメニューか
+   * @returns {HTMLElement}
+   */
+  const build = (a_list, a_isSub) => {
+    const el = document.createElement('div');
+    el.className = a_isSub ? 'md-menu md-submenu' : 'md-menu';
+    for (const item of a_list) {
+      if (!item) {
+        el.appendChild(document.createElement('hr'));
+        continue;
+      }
+      if (item.heading) {
+        // 選べない見出し（下の項目のまとまりの名前）
+        const heading = el.appendChild(document.createElement('div'));
+        heading.className = 'heading';
+        heading.textContent = item.label;
+        continue;
+      }
+      const button = document.createElement('button');
+      const check = button.appendChild(document.createElement('span'));
+      check.className = 'check';
+      check.textContent = item.checked ? '✓' : '';
+      const label = button.appendChild(document.createElement('span'));
+      label.className = 'label';
+      label.textContent = item.label;
+      if (item.title) button.title = item.title;
+      const key = button.appendChild(document.createElement('span'));
+      key.className = 'key';
+      key.textContent = item.submenu ? '▸' : item.key || '';
+      button.disabled = !!item.disabled;
+      // mousedown で既定の動作を止めて、編集中のカーソル位置（選択範囲）を保つ
+      button.addEventListener('mousedown', (e) => e.preventDefault());
+      if (item.submenu) {
+        // サブメニュー：マウスを乗せる（クリックする）と右側に開く
+        button.classList.add('has-submenu');
+        const open = () => {
+          if (sub && sub.dataset.owner === item.label) return;
+          openSub(button, item);
+        };
+        button.addEventListener('mouseenter', open);
+        button.addEventListener('click', open);
+      } else {
+        // 親のメニューのほかの項目にマウスを乗せたら、サブメニューを閉じる
+        if (!a_isSub) button.addEventListener('mouseenter', closeSub);
+        button.addEventListener('click', () => {
+          close();
+          a_onSelect(item);
+        });
+      }
+      el.appendChild(button);
     }
-    if (item.heading) {
-      // 選べない見出し（下の項目のまとまりの名前）
-      const heading = menu.appendChild(document.createElement('div'));
-      heading.className = 'heading';
-      heading.textContent = item.label;
-      continue;
-    }
-    const button = document.createElement('button');
-    const check = button.appendChild(document.createElement('span'));
-    check.className = 'check';
-    check.textContent = item.checked ? '✓' : '';
-    const label = button.appendChild(document.createElement('span'));
-    label.className = 'label';
-    label.textContent = item.label;
-    if (item.title) button.title = item.title;
-    const key = button.appendChild(document.createElement('span'));
-    key.className = 'key';
-    key.textContent = item.key || '';
-    button.disabled = !!item.disabled;
-    // mousedown で既定の動作を止めて、編集中のカーソル位置（選択範囲）を保つ
-    button.addEventListener('mousedown', (e) => e.preventDefault());
-    button.addEventListener('click', () => {
-      close();
-      a_onSelect(item);
-    });
-    menu.appendChild(button);
-  }
+    return el;
+  };
+
+  /**
+   * サブメニューを、項目の右側に開く（画面の右にはみ出す場合は左側に開く）。
+   * @param {HTMLElement} a_button サブメニューを持つ項目
+   * @param {object} a_item その項目
+   */
+  const openSub = (a_button, a_item) => {
+    closeSub();
+    sub = build(a_item.submenu, true);
+    sub.dataset.owner = a_item.label;
+    a_button.classList.add('submenu-open'); // サブメニューを開いている間は、項目を選んだ色のままにする
+    document.body.appendChild(sub);
+    const r = a_button.getBoundingClientRect();
+    const size = sub.getBoundingClientRect();
+    const left = r.right + size.width + 4 <= window.innerWidth ? r.right - 2 : Math.max(4, r.left - size.width + 2);
+    sub.style.left = `${left}px`;
+    sub.style.top = `${Math.max(4, Math.min(r.top - 5, window.innerHeight - size.height - 4))}px`;
+  };
+
+  const menu = build(a_items, false);
   document.body.appendChild(menu);
   // 画面の外にはみ出さないよう位置を調整する
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.min(a_x, window.innerWidth - rect.width - 4)}px`;
   menu.style.top = `${Math.min(a_y, window.innerHeight - rect.height - 4)}px`;
-  const onOutside = (e) => { if (!menu.contains(e.target)) close(); };
-  const onKey = (e) => { if ('Escape' === e.key) close(); };
+  const onOutside = (e) => {
+    if (!menu.contains(e.target) && !(sub && sub.contains(e.target))) close();
+  };
+  const onKey = (e) => {
+    if ('Escape' !== e.key) return;
+    // サブメニューが開いていれば、サブメニューだけを閉じる（Windows のメニューと同じ）
+    if (sub) closeSub();
+    else close();
+  };
   function close() {
     menu.remove();
+    closeSub();
     document.removeEventListener('mousedown', onOutside, true);
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('blur', close);
