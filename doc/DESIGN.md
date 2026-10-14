@@ -5,17 +5,21 @@ mde の画面を HTML で作り直したアプリケーションです。この�
 
 ## フォルダ構成
 
-- `README.md`：ユーザーズガイド（初めて使う方向けの使い方）
+- `mdew.sln`：ソリューション（`mdew\mdew.csproj` と `msi\msi.wixproj` の2つのプロジェクト）
+- `README.md`：ユーザーズガイド（初めて使う方向けの使い方）。インストーラーにも同梱します
+- `LICENSE.txt`：mdew のライセンス（MIT）
 - `doc\DESIGN.md`：この文書（開発者向けの設計メモ）
-- `TODO.md`：作業予定（mde にできて mdew でまだできないこと、確認が残っているもの、対応済みのこと）
-- `mdew.sln` / `mdew.csproj` / `Program.cs` / `AppSettings.cs`：WebView2 を載せる入れ物（WPF）。
-  ファイルを開く・保存する、画像の保存など、OS とのやり取りを担当します（ari 版と同じもの）。
-- `dialog\AboutWindow.xaml`：バージョン情報のウィンドウ（mde から移植）
-- `dialog\FindReplaceWindow.xaml`：検索と置換のウィンドウ（mde から移植。検索・置換の処理は `web\js\find.js`）
-- `dialog\PdfMarginDialog.xaml`：PDF の余白の設定（mde から移植）
-- `ThirdPartyNotices.txt`：サードパーティ（WebView2 SDK）のライセンス表示。実行フォルダへコピーされます。
-  NuGet のパッケージを追加・更新した時は、この中のバージョン・ライセンス文も直してください
-- `web\`：画面側。ビルドは不要で、ここのファイルがそのまま実行フォルダへコピーされます。
+- `doc\TODO.md`：作業予定（mde にできて mdew でまだできないこと、確認が残っているもの、対応済みのこと）
+- `mdew\`：アプリ本体のプロジェクト
+  - `mdew.csproj` / `Program.cs` / `AppSettings.cs`：WebView2 を載せる入れ物（WPF）。
+    ファイルを開く・保存する、画像の保存など、OS とのやり取りを担当します（ari 版と同じもの）。
+    64bit（x64）専用です（`RuntimeIdentifier` を `win-x64` にしているので、WebView2Loader.dll は x64 用だけが
+    実行フォルダの直下にコピーされます）。
+  - `dialog\AboutWindow.xaml`：バージョン情報のウィンドウ（mde から移植）
+  - `dialog\FindReplaceWindow.xaml`：検索と置換のウィンドウ（mde から移植。検索・置換の処理は `web\js\find.js`）
+  - `dialog\PdfMarginDialog.xaml`：PDF の余白の設定（mde から移植）
+  - `images\mde.ico` / `images\mde.png`：アプリのアイコン（mde と同じもの）
+  - `web\`：画面側。ビルドは不要で、ここのファイルがそのまま実行フォルダへコピーされます。
   - `index.html` / `app.css`：画面の構成と見た目
   - `js\main.js`：画面全体の動き、ホスト（C#）とのやり取り
   - `js\editor.js`：編集部分（入力時の書式変換、元に戻す、編集していない部分を元のまま保存する仕組み）
@@ -23,10 +27,26 @@ mde の画面を HTML で作り直したアプリケーションです。この�
   - `js\folder.js`：フォルダビュー
   - `js\find.js`：検索と置換
   - `js\clipboard.js`：Excel 等の他のアプリとのコピー・貼り付け
+- `msi\`：インストーラー（WiX Toolset 4）のプロジェクト（mde の msi を元にしたもの）
+  - `Package.wxs`：製品名・バージョン・アップグレードコード・アイコン等
+  - `Directory.wxs`：インストール先のフォルダ構成（`web\js` を含む）
+  - `File.wxs`：同梱するファイルの一覧と、エクスプローラーの右クリックメニュー「mdew で開く」・スタートメニューへの登録。
+    MSI はファイルを１つずつ列挙する必要があるため、`web\` にファイルを追加・削除した時や、
+    NuGet のパッケージを追加・更新した時は、ここも直してください
+  - `UpgradeConfirmDlg.wxs`：アップグレード時の確認・右クリックメニューを追加するかの確認の画面
+  - `Package.ja-JP.wxl` / `Package.en-US.wxl`：画面の文言（日本語版・英語版の msi がそれぞれ作られます）
+  - `License.rtf` / `LICENSE.txt`：インストール時に表示する・同梱するライセンス
+  - `THIRD-PARTY-NOTICES.txt`：サードパーティ（WebView2 SDK）のライセンス表示。インストール先に同梱します。
+    NuGet のパッケージを追加・更新した時は、この中のバージョン・ライセンス文も直してください
 
 ## ビルド
 
 Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js は不要です）。
+
+構成を Release にしてソリューションをビルドすると、インストーラーも作られます
+（`msi\bin\x64\Release\ja-JP\mdew.msi` と `en-US\mdew.msi`）。インストーラーには mdew の実行フォルダ
+（`mdew\bin\Release\net8.0-windows`）のファイルが入るので、先に mdew のビルドが通っている必要があります
+（ソリューションのビルドでは、プロジェクトの参照により mdew が先にビルドされます）。
 
 ## 今できること（成立確認の範囲）
 
@@ -80,7 +100,9 @@ Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js �
 - ステータスバーの「停止」「入力遅延」の回数（IME フリーズの検証用）は、Debug ビルドの時だけ表示します
 - 文字の貼り付けは、Markdown として読んで書式（見出し・リスト・表・太字等）にします。
   書式にしたくない時は「書式なしで貼り付け」（Ctrl+Shift+V・右クリックのメニュー）
-- 「バージョン情報」ボタンで、アプリ名・バージョン・著作権を表示します（mde の AboutWindow と同じ画面）
+- 「ヘルプ」→「Readmeを開く」（F1）で、実行フォルダの README.md を新しいウィンドウで開きます（mde と同じ。
+  README.md はビルド時に実行フォルダへコピーされます。検索と置換等のダイアログでの F1 は、ホスト側の Program.Main で受けます）
+- 「ヘルプ」→「バージョン情報」で、アプリ名・バージョン・著作権を表示します（mde の AboutWindow と同じ画面）
 - F12 で開発者ツール（画面側の調査・デバッグ用）を開きます
 - リンクはクリックで開きます（`#見出し` は文書内の見出しへ移動、http(s)・mailto は既定のアプリ、相対パスの .md はこのウィンドウ）。
   リンクの文字を編集する時は、矢印キーでカーソルを移動します

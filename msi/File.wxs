@@ -1,0 +1,82 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <ComponentGroup Id="mdew" Directory="INSTALLFOLDER">
+
+		<!-- Application -->
+		<Component Id="mdew.exe.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="mdew.exe" KeyPath="yes" /></Component>
+		<Component Id="mdew.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="mdew.dll" KeyPath="yes" /></Component>
+		<Component Id="mdew.dll.runtimeconfig.json.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="mdew.runtimeconfig.json" KeyPath="yes" /></Component>
+		<Component Id="mdew.dll.deps.json.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="mdew.deps.json" KeyPath="yes" /></Component>
+
+		<!-- WebView2（NuGetパッケージ Microsoft.Web.WebView2）のライブラリ。mdew.csprojの
+		     PackageReferenceのバージョンを更新した時も、ファイル構成が変わっていないか確認する。
+		     .xml（IntelliSense用のドキュメント）はビルド出力にあるが実行には不要なので同梱しない。 -->
+		<Component Id="Microsoft.Web.WebView2.Core.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="Microsoft.Web.WebView2.Core.dll" KeyPath="yes" /></Component>
+		<Component Id="Microsoft.Web.WebView2.Wpf.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="Microsoft.Web.WebView2.Wpf.dll" KeyPath="yes" /></Component>
+		<Component Id="Microsoft.Web.WebView2.WinForms.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="Microsoft.Web.WebView2.WinForms.dll" KeyPath="yes" /></Component>
+
+		<!-- WebView2Loader.dll（ネイティブDLL、x64用）。mdew.csprojでRuntimeIdentifierをwin-x64に
+		     しているので、ビルド出力の直下（mdew.exeと同じ場所）にx64用だけがコピーされる。 -->
+		<Component Id="WebView2Loader.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="WebView2Loader.dll" KeyPath="yes" /></Component>
+
+		<!-- 画面側（HTML・CSS・JavaScript）。mdew.csproj側は"web\**"でフォルダごとまとめて
+		     コピーする設定になっているが、MSI側は１ファイルずつ明示的に列挙する必要があるため、
+		     webフォルダにファイルを追加・削除した場合はここも合わせて直す。 -->
+		<Component Id="Web.index.html.Component" Directory="WebFolder" Guid="*"><File Id="Web.index.html" Source="web\index.html" KeyPath="yes" /></Component>
+		<Component Id="Web.app.css.Component" Directory="WebFolder" Guid="*"><File Id="Web.app.css" Source="web\app.css" KeyPath="yes" /></Component>
+		<Component Id="Web.js.clipboard.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.clipboard.js" Source="web\js\clipboard.js" KeyPath="yes" /></Component>
+		<Component Id="Web.js.editor.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.editor.js" Source="web\js\editor.js" KeyPath="yes" /></Component>
+		<Component Id="Web.js.find.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.find.js" Source="web\js\find.js" KeyPath="yes" /></Component>
+		<Component Id="Web.js.folder.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.folder.js" Source="web\js\folder.js" KeyPath="yes" /></Component>
+		<Component Id="Web.js.main.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.main.js" Source="web\js\main.js" KeyPath="yes" /></Component>
+		<Component Id="Web.js.markdown.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.markdown.js" Source="web\js\markdown.js" KeyPath="yes" /></Component>
+
+		<!-- エクスプローラーの右クリックメニューに「mdewで開く」を追加する（.mdファイル向け）。
+		     .mdファイルの既定アプリの設定とは関係なく（.mdをダブルクリックした時に開くアプリが
+		     何であっても）、SystemFileAssociationsの下に登録することで常にこの項目が表示される。
+		     ファイルを選択して実行すると、そのファイルを開く（MainWindow.ResolveStartupPath参照）。
+		     追加するかどうかはインストール時にユーザーへ確認する（ADDCONTEXTMENUプロパティ、
+		     既定は追加しない側。UpgradeConfirmDlg.wxsのContextMenuOptionDlg参照）。 -->
+		<Component Id="OpenWithMdeFileVerb.Component" Directory="INSTALLFOLDER" Guid="*" Condition="ADDCONTEXTMENU = &quot;1&quot;">
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Type="string" Value="!(loc.OpenWithMdeVerb)" KeyPath="yes" />
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Name="MUIVerb" Type="string" Value="!(loc.OpenWithMdeVerb)" />
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Name="Icon" Type="string" Value="[INSTALLFOLDER]mdew.exe,0" />
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde\command" Type="string" Value="&quot;[INSTALLFOLDER]mdew.exe&quot; &quot;%1&quot;" />
+		</Component>
+
+		<!-- エクスプローラーでフォルダの何もない場所を右クリックした時のコンテキストメニューにも
+		     「mdewで開く」を追加する。実行すると、そのフォルダをmdewのフォルダビューに読み込んだ
+		     状態で起動する（%Vはこの右クリックの対象フォルダのパスに展開される。
+		     MainWindow.ResolveStartupPath参照）。上記と同じADDCONTEXTMENUプロパティで
+		     まとめて追加要否を判定する（片方だけ追加する設定は無い）。 -->
+		<Component Id="OpenWithMdeFolderVerb.Component" Directory="INSTALLFOLDER" Guid="*" Condition="ADDCONTEXTMENU = &quot;1&quot;">
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Type="string" Value="!(loc.OpenWithMdeVerb)" KeyPath="yes" />
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Name="MUIVerb" Type="string" Value="!(loc.OpenWithMdeVerb)" />
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Name="Icon" Type="string" Value="[INSTALLFOLDER]mdew.exe,0" />
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde\command" Type="string" Value="&quot;[INSTALLFOLDER]mdew.exe&quot; &quot;%V&quot;" />
+		</Component>
+
+		<!-- License -->
+		<Component Id="License"><File Source="LICENSE.txt" /></Component>
+
+		<!-- サードパーティライブラリ（WebView2、上記参照）のライセンス表示 -->
+		<Component Id="ThirdPartyNotices"><File Source="THIRD-PARTY-NOTICES.txt" /></Component>
+
+		<!-- Readme（ヘルプ→「Readmeを開く」・F1で開く。mdew.csprojのビルド設定により、ビルド出力
+		     フォルダ（mdew.exe等と同じ場所）へコピーされたものをそのまま同梱する）。 -->
+		<Component Id="Readme.md.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="README.md" /></Component>
+
+		<!-- スタートメニューショートカット -->
+		<Component Id="StartMenuShortcutComponent" Directory="ProgramMenuDir" Guid="*">
+			<Shortcut Id="StartMenuShortcut" Name="mdew" Target="[INSTALLFOLDER]mdew.exe" WorkingDirectory="INSTALLFOLDER" >
+				<ShortcutProperty Key="System.AppUserModel.ID" Value="tanno-seiichi.mdew"/>
+			</Shortcut>
+
+			<RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
+        
+			<RegistryValue Root="HKCU" Key="Software\tanno-seiichi\mdew" Name="StartMenu" Type="integer" Value="1" KeyPath="yes"/>
+		</Component>		
+
+	</ComponentGroup>
+  </Fragment>
+</Wix>

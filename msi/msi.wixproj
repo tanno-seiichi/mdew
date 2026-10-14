@@ -1,0 +1,22 @@
+﻿<Project Sdk="WixToolset.Sdk/4.0.5">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>mdew</OutputName>
+    <!-- .wixpdb（デバッグ・パッチ生成用シンボルファイル）を出力せず、.msi単体になるようにする -->
+    <SuppressPdbOutput>true</SuppressPdbOutput>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <BindFiles>false</BindFiles>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="License.rtf" />
+    <Content Include="LICENSE.txt" />
+    <Content Include="THIRD-PARTY-NOTICES.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\mdew\mdew.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="4.0.5" />
+  </ItemGroup>
+</Project>

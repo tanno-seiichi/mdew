@@ -1,0 +1,33 @@
+﻿<!--
+This file contains the declaration of all the localizable strings.
+-->
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
+
+  <String Id="DowngradeError" Value="A newer version of [ProductName] is already installed on this machine.&#13;&#10;&#13;&#10;Setup cannot continue." />
+
+  <!--
+    Override WelcomeDlg's description text (the library marks it Overridable="yes").
+    Uses a property reference, swapped at runtime via WIX_WELCOME_MESSAGE.
+    The actual replacement text is written directly in UpgradeConfirmDlg.wxs.
+  -->
+  <String Id="WelcomeDlgDescription" Value="[WIX_WELCOME_MESSAGE]" />
+  <String Id="WelcomeDlgDescriptionInstall" Value="The Setup Wizard will install [ProductName] on your computer.&#13;&#10;&#13;&#10;Click Next to continue or Cancel to exit." />
+  <String Id="WelcomeDlgDescriptionUpgrade" Value="The Setup Wizard will upgrade [ProductName] on your computer.&#13;&#10;&#13;&#10;Click Next to continue or Cancel to exit." />
+
+  <!-- Downgrade confirmation dialog -->
+  <String Id="DowngradeErrorDlgTitle" Value="[ProductName] Setup" />
+  <String Id="DowngradeErrorDlgOK" Value="OK" />
+
+  <!-- Message shown on ExitDialog after a successful upgrade -->
+  <String Id="ExitMessageUpgradeComplete" Value="The upgrade has completed successfully." />
+
+  <!-- Explorer context menu verb "Open with mdew" -->
+  <String Id="OpenWithMdeVerb" Value="Open with mdew" />
+
+  <!-- ContextMenuOptionDlg (UpgradeConfirmDlg.wxs): confirmation dialog shown on a fresh
+       install, asking whether to add the "Open with mdew" Explorer context menu entries. -->
+  <String Id="ContextMenuOptionDlgTitle" Value="Explorer context menu" />
+  <String Id="ContextMenuOptionDlgDescription" Value="You can add &quot;Open with mdew&quot; to the Explorer right-click menu. It appears both when a .md file is selected and when you right-click empty space inside a folder." />
+  <String Id="ContextMenuOptionCheckBoxText" Value="Add &quot;Open with mdew&quot; to the right-click menu" />
+
+</WixLocalization>

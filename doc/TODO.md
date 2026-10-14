@@ -14,8 +14,8 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 - [ ] 同じウィンドウで新規作成（mde は Ctrl+N。mdew の Ctrl+N は新しいウィンドウ＝mde の Shift+Ctrl+N）
 - [ ] Ctrl+← / Ctrl+→ で、前・後に開いていたファイルへ移動
 - [ ] 閉じる・切り替える時の確認で「保存する」を選べるようにする（mdew は「破棄して閉じますか」のはい・いいえだけ）
-- [ ] メニューの項目を矢印キーで選ぶ操作（メニューバーは「ファイル」「表示」のメニューと、
-      「検索と置換」「バージョン情報」のボタン）
+- [ ] メニューの項目を矢印キーで選ぶ操作（メニューバーは「ファイル」「表示」「ヘルプ」のメニューと、
+      「検索と置換」のボタン）
 
 ### 画面・表示
 
@@ -60,10 +60,9 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 
 ### 配布
 
-- [ ] インストーラー（msi）・スタートメニューへの登録（バージョン情報の画面は対応済み）
 - [ ] .NET 8 のサポート終了（2026-11-10）への対応：.NET 10（LTS）へ移行する（csproj の `net8.0-windows` →
       `net10.0-windows`）。あわせて WebView2 SDK を新しい版に更新するか検討する（今は 1.0.2903.40。
-      更新したら ThirdPartyNotices.txt のバージョン・ライセンス文も直す）
+      更新したら msi\THIRD-PARTY-NOTICES.txt のバージョン・ライセンス文と msi\File.wxs も直す）
 
 ## 確認が残っているもの
 
@@ -75,6 +74,20 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 - [ ] 置換（すべて置換・1件ずつ置換）と「すべて保存」を、実際のファイルで確かめる（ブラウザの自動テストでは確認済み）
 
 ## 対応済み
+
+- [x] **ヘルプメニュー・F1 で Readme を開く**（2026-10-14）
+  - 「バージョン情報」のボタンを「ヘルプ」のメニュー（Alt+H）に変え、「Readmeを開く」（F1）と「バージョン情報」を置く（mde と同じ）
+  - README.md はビルド時に実行フォルダへコピーし（csproj）、それを新しいウィンドウ（「新規」と同じく別のプロセス）で開く。
+    msi もビルド出力の README.md を同梱する
+  - F1 はメインのウィンドウでは画面側（main.js）、検索と置換・PDF の余白・バージョン情報のダイアログではホスト側
+    （Program.Main で Window クラス全体に登録したハンドラー。Owner のメインのウィンドウで開く）で受ける
+
+- [x] **インストーラー（msi）**（2026-10-14）
+  - mde の msi（WiX Toolset 4）を元に `msi\` を追加。日本語版・英語版の msi を作る。スタートメニューへの登録、
+    エクスプローラーの右クリックメニュー「mdew で開く」（インストール時に追加するか選べる）
+  - 同梱するファイル：mdew 本体、WebView2 SDK の DLL（Core・Wpf・WinForms）、WebView2Loader.dll（x64 用のみ。csproj の RuntimeIdentifier を win-x64 にして、実行フォルダの直下へ x64 用だけがコピーされるようにした）、
+    `web\`（index.html・app.css・js\*.js）、README.md、LICENSE.txt、THIRD-PARTY-NOTICES.txt
+  - ThirdPartyNotices.txt は実行フォルダへのコピーをやめ、`msi\THIRD-PARTY-NOTICES.txt` としてインストール先に同梱する
 
 - [x] **アプリの設定・表示まわり**（2026-10-11〜12）
   - アイコン・アプリ名・作成者・著作権（csproj）、バージョン 0.0.1.0（ファイルバージョン・製品バージョンとも）、

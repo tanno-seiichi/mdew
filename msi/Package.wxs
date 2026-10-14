@@ -1,0 +1,26 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+	  Name="mdew"
+	  Manufacturer="tanno-seiichi"
+	  Version="0.0.1"
+	  UpgradeCode="{AFEE0BE8-B18A-490E-AFF1-2DFFCDC17439}"
+	  Scope="perMachine">
+	  
+    <MajorUpgrade
+		DowngradeErrorMessage="!(loc.DowngradeError)" />
+
+	  <ui:WixUI Id="WixUI_MinimalUpgrade" />
+	  <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <Icon Id="ProductIcon" SourceFile="..\mdew\images\mde.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+
+    <!-- cabファイルを外部ファイルとして出力せず、.msiファイルに埋め込む -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="mdew" />
+    </Feature>
+  </Package>
+</Wix>

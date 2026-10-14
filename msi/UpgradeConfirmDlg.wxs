@@ -1,0 +1,264 @@
+﻿<!--
+  WixUI_Minimal をそのまま使うのをやめ、その中身を複製・改造した自前の UI
+  "WixUI_MinimalUpgrade" を定義しています。
+
+  【設計方針（改訂版）】
+  独自のダイアログを新設するのではなく、新規インストール時と同じ "WelcomeDlg" を
+  アップグレード時にも共用します。WelcomeDlg の説明文（WelcomeDlgDescription）は
+  ライブラリ側で Overridable="yes" と指定されているため、プロジェクト側の .wxl で
+  上書きできます。ここでは説明文をプロパティ参照 "[WIX_WELCOME_MESSAGE]" に差し替え、
+  アップグレード時だけ SetProperty で文言を切り替えています。
+
+  WelcomeDlg の [次へ] ボタンの遷移先も、アップグレード時（かつ右クリックメニュー
+  「mdewで開く」が既に追加済みの時）だけ、コンテキストメニュー追加確認画面
+  （ContextMenuOptionDlg）・ライセンス確認画面（LicenseAgreementDlg）のいずれも
+  経由せず、直接インストールを実行するように配線を分けています（詳細は
+  ContextMenuOptionDlg・CONTEXTMENU_ALREADY_ADDEDまわりのコメント、および
+  14.91・14.92節を参照）。
+
+  これにより、新規インストール時とアップグレード時で見た目（赤いバナー画像を
+  含む）が完全に同じになり、以前の「パタパタ切り替わる」問題も解消されます。
+
+  MaintenanceWelcomeDlg・MaintenanceTypeDlg・VerifyReadyDlg・ProgressDlg・
+  ExitDialog まわりの配線は WixUI_Common 側の共通定義をそのまま引き継いでおり、
+  変更していません（同一バージョン再インストール時の「削除／修復」画面は
+  今まで通りです）。パッチ（MSP）関連の分岐は本プロジェクトでは使用しないため
+  含めていません。
+
+  なお、WelcomeDlg の [キャンセル] ボタンは標準の「本当にキャンセルしますか？」
+  という確認ダイアログを経由する標準動作になります（独自ダイアログを使っていた
+  従来版は確認なしで即終了していました）。
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+
+    <!--
+      ExitDialog の補足メッセージ用プロパティ。
+      正しいプロパティ名は "WIXUI_EXITDIALOGOPTIONALTEXT"（ExitDialog 側の
+      OptionalText コントロールが直接参照している）です。
+      既定値は設定しません（＝新規インストール時は今まで通り何も表示しない）。
+    -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Secure="yes" />
+
+    <!-- アップグレード完了時だけ、Exit 画面に出すメッセージをセットする -->
+    <SetProperty
+      Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+      Value="!(loc.ExitMessageUpgradeComplete)"
+      After="ProgressDlg"
+      Sequence="ui"
+      Condition="WIX_UPGRADE_DETECTED" />
+
+    <!--
+      WelcomeDlg の説明文用プロパティ。既定はインストール向けの文言。
+      アップグレード時だけ、下の SetProperty でバージョンアップ向けの文言に
+      差し替えます。
+    -->
+    <Property Id="WIX_WELCOME_MESSAGE" Secure="yes" />
+
+    <!--
+      Property の Value による静的な値設定では、[ProductName] などの
+      プロパティ参照が実行時にフォーマット（解決）されないため、
+      WelcomeDlg 側で "[WIX_WELCOME_MESSAGE]" を展開した際に
+      "[ProductName]" が文字列のまま表示されてしまいます。
+      SetProperty（内部的には Id = 対象プロパティ名として扱われる）は
+      同じプロパティに対して複数条件で設定できないため、ここでは
+      CustomAction を直接使い、InstallUISequence 側で条件分岐しています。
+      これにより新規インストール時も [ProductName] が正しく解決されます。
+    -->
+    <CustomAction
+      Id="SetWelcomeMessageInstall"
+      Property="WIX_WELCOME_MESSAGE"
+      Value="!(loc.WelcomeDlgDescriptionInstall)" />
+
+    <CustomAction
+      Id="SetWelcomeMessageUpgrade"
+      Property="WIX_WELCOME_MESSAGE"
+      Value="!(loc.WelcomeDlgDescriptionUpgrade)" />
+
+    <!--
+      右クリックメニュー「mdewで開く」（.mdファイル・フォルダ背景、msi/File.wxs参照）を
+      追加するかどうかのユーザー選択を保持するプロパティ。既定値を設定していないため
+      既定は「追加しない」（未設定）で、ContextMenuOptionDlgのチェックボックスに
+      チェックを入れた場合だけ"1"になる。チェックを外すとMSIのCheckBoxコントロールの
+      標準動作により再びプロパティが未設定に戻る。Secure="yes"により、
+      msiexec /i mdew.msi ADDCONTEXTMENU=1 のようにサイレントインストール時にも
+      コマンドラインから指定できる。
+    -->
+    <Property Id="ADDCONTEXTMENU" Secure="yes" />
+
+    <!--
+      アップグレード時に、右クリックメニュー「mdewで開く」が既に追加済み（前回の
+      インストールでチェックを入れていた、または14.88〜14.90節の時点のバージョンで
+      無条件に追加されていた）かどうかを、実際のレジストリの状態から判定する
+      プロパティ。AppSearch（RegistrySearchの標準動作）により、UI・実行の両
+      シーケンスでインストール前に自動的に値がセットされる。OpenWithMdeFileVerb.
+      Componentのキーパス（既定値／Name属性なし）を検索対象にしている。片方の
+      Componentだけが単独で存在する状態は無い設計のため、これだけで足りる。
+    -->
+    <Property Id="CONTEXTMENU_ALREADY_ADDED" Secure="yes">
+      <RegistrySearch Id="OpenWithMdeRegistrySearch" Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Type="raw" />
+    </Property>
+
+    <!--
+      上記の判定で「既に追加済み」と分かった場合、確認画面（ContextMenuOptionDlg）を
+      経由せずにADDCONTEXTMENUを"1"にするためのCustomAction。チェックボックスは
+      UIシーケンスの中でしか操作されないため、確認画面を出さないアップグレード時にも
+      同じ結果になるよう、UI・実行の両シーケンスに登録する（下のInstallUISequence・
+      InstallExecuteSequence参照）。これを行わないと、既に追加済みの環境で
+      アップグレードするたびに、確認せずに右クリックメニューが削除されてしまう。
+    -->
+    <CustomAction
+      Id="SetAddContextMenuFromExisting"
+      Property="ADDCONTEXTMENU"
+      Value="1" />
+
+    <UI Id="WixUI_MinimalUpgrade_X64">
+
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <Property Id="WixUI_Mode" Value="Minimal" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="WelcomeDlg" />
+      <DialogRef Id="LicenseAgreementDlg" />
+
+      <!-- 同一バージョン再インストール時（変更なし、WixUI_Minimal.wxs と同じ内容） -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" Condition="1" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Condition="1" />
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" Condition="1" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" Condition="1" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" Condition="1" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" Condition="1" />
+
+      <!--
+        WelcomeDlg の [次へ]:
+        ・新規インストール時: コンテキストメニュー追加確認画面（ContextMenuOptionDlg）へ
+        ・アップグレード時、かつ右クリックメニューがまだ追加されていない場合: 同じく
+          ContextMenuOptionDlgへ（新規インストール時と同様に確認する。14.92節参照）
+        ・アップグレード時、かつ右クリックメニューが既に追加済みの場合: 確認画面・
+          ライセンス確認画面のいずれも経由せず、そのままインストール実行（既に追加済み
+          なら確認するまでもないため。ADDCONTEXTMENUプロパティは、下記
+          SetAddContextMenuFromExistingにより"1"にセットされ、右クリックメニューは
+          削除されず維持される）
+      -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="ContextMenuOptionDlg" Condition="NOT WIX_UPGRADE_DETECTED OR NOT CONTEXTMENU_ALREADY_ADDED" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="EndDialog" Value="Return" Condition="WIX_UPGRADE_DETECTED AND CONTEXTMENU_ALREADY_ADDED" />
+
+      <!--
+        コンテキストメニュー追加確認画面（新規インストール時、および右クリックメニューが
+        まだ追加されていないアップグレード時に表示）の[次へ]:
+        ・新規インストール時: ライセンス確認画面（LicenseAgreementDlg）へ（従来通り）
+        ・アップグレード時: ライセンス確認画面を経由せず、そのままインストール実行
+          （コンテキストメニュー確認画面を挟む以外は、従来のアップグレード時の流れ
+          （WelcomeDlgの[次へ]から直接インストール実行）と同じにする。14.94節参照）
+      -->
+      <Publish Dialog="ContextMenuOptionDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Condition="1" />
+      <Publish Dialog="ContextMenuOptionDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" Condition="NOT WIX_UPGRADE_DETECTED" />
+      <Publish Dialog="ContextMenuOptionDlg" Control="Next" Event="EndDialog" Value="Return" Condition="WIX_UPGRADE_DETECTED" />
+
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="ContextMenuOptionDlg" Condition="1" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="EndDialog" Value="Return" Condition="LicenseAccepted = &quot;1&quot;" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Print" Event="DoAction" Value="WixUIPrintEula_X64" Condition="1" />
+
+      <!--
+        コンテキストメニュー「mdewで開く」を追加するかどうかの確認画面。WelcomeDlgと
+        LicenseAgreementDlgの間に表示する。新規インストール時は必ず表示し、
+        アップグレード時は右クリックメニューがまだ追加されていない場合のみ表示する
+        （既に追加済みの場合は表示せず、確認するまでもなくそのまま維持する。
+        14.91・14.92節参照）。チェックボックスの状態はADDCONTEXTMENUプロパティに
+        反映され、msi/File.wxsのOpenWithMdeFileVerb.Component・
+        OpenWithMdeFolderVerb.ComponentのConditionで参照している。チェックを
+        入れなければ既定どおり追加しない。
+      -->
+      <Dialog Id="ContextMenuOptionDlg" Width="370" Height="270" Title="!(loc.ContextMenuOptionDlgTitle)">
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Description" Type="Text" X="20" Y="60" Width="330" Height="60" NoPrefix="yes" Text="!(loc.ContextMenuOptionDlgDescription)" />
+
+        <Control Id="ContextMenuCheckBox" Type="CheckBox" X="20" Y="130" Width="330" Height="18" Property="ADDCONTEXTMENU" CheckBoxValue="1" Text="!(loc.ContextMenuOptionCheckBoxText)" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" Condition="1" />
+        </Control>
+
+      </Dialog>
+
+      <!-- ダウングレード確認ダイアログ（より新しいバージョンが既にインストールされている場合） -->
+      <Dialog Id="DowngradeErrorDlg" Width="370" Height="270" Title="!(loc.DowngradeErrorDlgTitle)">
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="MessageText" Type="Text" X="25" Y="60" Width="320" Height="100" NoPrefix="yes" Text="!(loc.DowngradeError)" />
+
+        <Control Id="OK" Type="PushButton" X="304" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.DowngradeErrorDlgOK)">
+          <Publish Event="EndDialog" Value="Exit" Condition="1" />
+        </Control>
+
+      </Dialog>
+
+      <!--
+        WelcomeDlg は新規インストール・アップグレードの両方で表示します
+        （表示される説明文だけプロパティで切り替わります）。
+        ダウングレード時（より新しいバージョンがインストール済み）は
+        LaunchCondition が既にブロックするため、表示しないようにしています。
+      -->
+      <InstallUISequence>
+        <Custom Action="SetWelcomeMessageInstall" After="LaunchConditions" Condition="NOT WIX_UPGRADE_DETECTED" />
+        <Custom Action="SetWelcomeMessageUpgrade" After="SetWelcomeMessageInstall" Condition="WIX_UPGRADE_DETECTED" />
+        <!--
+          右クリックメニューが既に追加済みの場合、確認画面を経由せずADDCONTEXTMENUを
+          セットする。CONTEXTMENU_ALREADY_ADDEDはAppSearch（標準アクション）で
+          セットされるプロパティのため、AppSearchの後に実行する必要がある。
+        -->
+        <Custom Action="SetAddContextMenuFromExisting" After="AppSearch" Condition="CONTEXTMENU_ALREADY_ADDED" />
+        <Show Dialog="WelcomeDlg" After="SetWelcomeMessageUpgrade" Condition="NOT Installed AND NOT WIX_DOWNGRADE_DETECTED" />
+        <!--
+          DowngradeErrorDlg は "LaunchConditions" より前に割り込ませます。
+          [OK] は EndDialog Value="Exit" で即座に UI シーケンス全体を終了するため、
+          この後の LaunchConditions（自動生成された DowngradeErrorMessage 用の
+          チェック）自体が実行されず、標準の FatalError（「エラーが発生した
+          ため...」）画面が表示されることもありません。
+        -->
+        <Show Dialog="DowngradeErrorDlg" Before="LaunchConditions" Condition="WIX_DOWNGRADE_DETECTED" />
+      </InstallUISequence>
+
+      <Property Id="ARPNOMODIFY" Value="1" />
+
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+
+    <!--
+      SetAddContextMenuFromExistingはInstallUISequence（上記UI要素内）だけでなく
+      InstallExecuteSequenceにも登録する。ADDCONTEXTMENUプロパティは通常、対話的
+      インストールならUIシーケンス側で確定した値が実行シーケンスへそのまま引き継がれる
+      が、msiexec /quiet 等サイレントインストール（UIシーケンスを経由しない）でも
+      既に追加済みの右クリックメニューが削除されてしまわないよう、実行シーケンス側にも
+      同じ判定・設定を行っている。
+      【WIX0005修正】InstallExecuteSequenceはUI要素の子要素にはできない
+      （"The UI element contains an unexpected child element 'InstallExecuteSequence'"）ため、
+      Fragment直下（UI要素の外）に置く必要がある。14.92節の初版ではUI要素の内側に
+      置いてしまっており、実機のビルドでエラーになった（14.93節参照）。
+    -->
+    <InstallExecuteSequence>
+      <Custom Action="SetAddContextMenuFromExisting" After="AppSearch" Condition="CONTEXTMENU_ALREADY_ADDED" />
+    </InstallExecuteSequence>
+
+  </Fragment>
+</Wix>

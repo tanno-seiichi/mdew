@@ -1,0 +1,33 @@
+﻿<!--
+This file contains the declaration of all the localizable strings.
+-->
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="ja-JP">
+
+  <String Id="DowngradeError" Value="このマシンには、より新しい「[ProductName]」のバージョンがすでにインストールされています。&#13;&#10;&#13;&#10;セットアップを続行することはできません。" />
+
+  <!--
+    WelcomeDlg の説明文を上書きします（ライブラリ側で Overridable="yes" のため上書き可能）。
+    プロパティ参照にしておき、実行時に WIX_WELCOME_MESSAGE の値へ差し替わります。
+    差し替え先の実際の文言は UpgradeConfirmDlg.wxs 側に直接記述しています。
+  -->
+  <String Id="WelcomeDlgDescription" Value="[WIX_WELCOME_MESSAGE]" />
+  <String Id="WelcomeDlgDescriptionInstall" Value="セットアップ ウィザードは、このコンピューターに [ProductName] をインストールします。&#13;&#10;&#13;&#10;続行するには「次へ」を、終了するには「キャンセル」を選択してください。" />
+  <String Id="WelcomeDlgDescriptionUpgrade" Value="セットアップ ウィザードは、[ProductName] をバージョンアップします。&#13;&#10;&#13;&#10;続行するには「次へ」を、終了するには「キャンセル」を選択してください。" />
+
+  <!-- ダウングレード確認ダイアログ -->
+  <String Id="DowngradeErrorDlgTitle" Value="[ProductName] セットアップ" />
+  <String Id="DowngradeErrorDlgOK" Value="OK" />
+
+  <!-- アップグレード完了時に ExitDialog に表示するメッセージ -->
+  <String Id="ExitMessageUpgradeComplete" Value="アップグレードが完了しました。" />
+
+  <!-- エクスプローラー右クリックメニューの「mdew で開く」 -->
+  <String Id="OpenWithMdeVerb" Value="mdew で開く" />
+
+  <!-- ContextMenuOptionDlg（UpgradeConfirmDlg.wxs）：新規インストール時に、右クリック
+       メニュー「mdewで開く」を追加するかどうかを確認するダイアログの文言。 -->
+  <String Id="ContextMenuOptionDlgTitle" Value="エクスプローラーの右クリックメニュー" />
+  <String Id="ContextMenuOptionDlgDescription" Value="エクスプローラーの右クリックメニューに「mdew で開く」を追加できます。.mdファイルを選択した時と、フォルダの何もない場所を右クリックした時の両方に表示されます。" />
+  <String Id="ContextMenuOptionCheckBoxText" Value="右クリックメニューに「mdew で開く」を追加する" />
+
+</WixLocalization>

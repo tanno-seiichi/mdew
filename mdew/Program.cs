@@ -287,6 +287,10 @@ namespace mdew
                     // メニュー「閉じる」（Ctrl+W）：このウィンドウを閉じる（保存していない変更があれば OnClosing で確認する）
                     Close();
                     break;
+                case "openReadme":
+                    // メニュー「ヘルプ」→「Readmeを開く」（F1）
+                    OpenReadme();
+                    break;
             }
         }
 
@@ -959,7 +963,8 @@ namespace mdew
 
         /// <summary>「新規」：このアプリをもう 1 つ起動して、新しいウィンドウを開く。新しいウィンドウは、
         /// 今のウィンドウから少し右下にずらした位置に同じ大きさで開く（今のウィンドウが最大化されていれば最大化）。</summary>
-        private void OpenNewWindow()
+        /// <param name="a_path">新しいウィンドウで開くファイルのパス（省略時は何も開かない＝新規）。</param>
+        private void OpenNewWindow(string a_path = null)
         {
             try
             {
@@ -969,6 +974,10 @@ namespace mdew
                 {
                     psi.ArgumentList.Add(PLACEMENT_OPTION + placement);
                 }
+                if (null != a_path)
+                {
+                    psi.ArgumentList.Add(a_path);
+                }
                 System.Diagnostics.Process.Start(psi);
             }
             catch (Exception ex)
@@ -976,6 +985,22 @@ namespace mdew
                 ErrorLog.Write("新しいウィンドウを開けませんでした", ex);
                 Post(new { cmd = "error", message = $"新しいウィンドウを開けませんでした。\n{ex.Message}" });
             }
+        }
+
+        /// <summary>「ヘルプ」→「Readmeを開く」（F1）：実行フォルダの README.md（mdew.csproj の設定で、ビルド時に
+        /// リポジトリ直下の README.md がコピーされる。インストーラーでもインストール先に置く）を、新しいウィンドウで開く
+        /// （mde と同じ。今のウィンドウで開いているファイルには触れない）。検索と置換等のダイアログで F1 を押した時は、
+        /// Program.Main で登録したハンドラーから、ダイアログの Owner のこのウィンドウに対して呼ばれる。</summary>
+        public void OpenReadme()
+        {
+            string readmePath = Path.Combine(AppContext.BaseDirectory, "README.md");
+            if (!File.Exists(readmePath))
+            {
+                MessageBox.Show(this, "README.md が見つかりませんでした：" + readmePath, "Readmeを開く",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            OpenNewWindow(readmePath);
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -1735,6 +1760,28 @@ namespace mdew
             };
             AppDomain.CurrentDomain.UnhandledException += (s, e) => ErrorLog.Write("想定外のエラー（アプリ終了）", e.ExceptionObject as Exception);
             System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (s, e) => ErrorLog.Write("非同期処理の想定外のエラー", e.Exception);
+            // F1 で「Readmeを開く」を、検索と置換・PDF の余白・バージョン情報のダイアログでも使えるようにする
+            // （mde と同じ。Window クラス全体に登録するので、ダイアログを追加した時も個別の対応は要らない）。
+            // メインのウィンドウ（WebView2）での F1 は、画面側（main.js）で受けるので、ここでは扱わない（二重に開かないように）
+            EventManager.RegisterClassHandler(typeof(Window), UIElement.PreviewKeyDownEvent,
+                new System.Windows.Input.KeyEventHandler((s, e) =>
+                {
+                    if (System.Windows.Input.Key.F1 != e.Key || s is MainWindow)
+                    {
+                        return;
+                    }
+                    // ダイアログは Owner＝開いた元のメインのウィンドウで作っているので、Owner をたどる
+                    Window window = s as Window;
+                    while (null != window && !(window is MainWindow))
+                    {
+                        window = window.Owner;
+                    }
+                    if (window is MainWindow mainWindow)
+                    {
+                        e.Handled = true;
+                        mainWindow.OpenReadme();
+                    }
+                }));
             ErrorLog.Write($"起動（v{Version}）", null);
             app.Exit += (s, e) => ErrorLog.Write($"終了（終了コード={e.ApplicationExitCode}）", null);
             // 起動時引数：開くファイルのパスと、「新規」で開いた時のウィンドウの位置（--placement=）

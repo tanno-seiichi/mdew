@@ -1,0 +1,15 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+	<Fragment>
+		<StandardDirectory Id="ProgramFiles6432Folder">
+			<Directory Id="INSTALLFOLDER" Name="!(bind.Property.ProductName)">
+				<!-- 画面側（HTML・CSS・JavaScript）の格納先。File.wxs参照。 -->
+				<Directory Id="WebFolder" Name="web">
+					<Directory Id="WebJsFolder" Name="js" />
+				</Directory>
+			</Directory>
+		</StandardDirectory>
+		<StandardDirectory Id="ProgramMenuFolder">
+			<Directory Id="ProgramMenuDir" Name="!(bind.Property.ProductName)" />
+		</StandardDirectory>
+	</Fragment>
+</Wix>

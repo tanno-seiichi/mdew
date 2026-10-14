@@ -9,7 +9,7 @@
 //                {cmd:'openFind'} / {cmd:'findUpdate', status | results, selectedIndex | step} /
 //                {cmd:'openImage', src} / {cmd:'exportPdf', name} / {cmd:'pdfMargin'} /
 //                {cmd:'openRecent', path} / {cmd:'clearRecent'} / {cmd:'openRecentFolder', path, relPath} /
-//                {cmd:'clearRecentFolders'} / {cmd:'close'} /
+//                {cmd:'clearRecentFolders'} / {cmd:'close'} / {cmd:'openReadme'} /
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
@@ -1032,6 +1032,8 @@ const commands = {
   softBreakJoin: () => setSoftBreakMode(true),
   toggleSource: () => setSourceMode(!state.sourceMode),
   about: () => send({ cmd: 'about' }), // バージョン情報のウィンドウ（ホスト側の dialog\AboutWindow）
+  // Readme を開く（実行フォルダの README.md を新しいウィンドウで開く。ホスト側の OpenReadme）
+  readme: () => send({ cmd: 'openReadme' }),
 };
 document.querySelectorAll('#menubar button[data-cmd]').forEach((b) =>
   b.addEventListener('click', () => commands[b.dataset.cmd]()));
@@ -1179,6 +1181,15 @@ const MENUS = {
       { label: '空行が入るまで改行しない', checked: joinSoftBreaks, cmd: 'softBreakJoin' },
     ],
   },
+  help: {
+    button: $('menu-help'),
+    key: 'h',
+    items: () => [
+      { label: 'Readmeを開く', key: 'F1', cmd: 'readme' },
+      null,
+      { label: 'バージョン情報', cmd: 'about' },
+    ],
+  },
 };
 /** 開いているメニューの名前（MENUS のキー。開いていなければ null）。 */
 let openMenuName = null;
@@ -1225,8 +1236,8 @@ for (const [name, def] of Object.entries(MENUS)) {
 }
 
 // ショートカット：Ctrl+S 保存、Ctrl+Shift+S 名前を付けて保存、Ctrl+O 開く、Ctrl+N 新規、Ctrl+F 検索と置換、
-// Ctrl+P PDFに書き出し、Ctrl+W 閉じる、F12 開発者ツール、
-// Alt+F「ファイル」・Alt+V「表示」のメニュー
+// Ctrl+P PDFに書き出し、Ctrl+W 閉じる、F1 Readmeを開く、F12 開発者ツール、
+// Alt+F「ファイル」・Alt+V「表示」・Alt+H「ヘルプ」のメニュー
 window.addEventListener('keydown', (e) => {
   if (e.altKey && !e.ctrlKey && !e.shiftKey) {
     const name = Object.keys(MENUS).find((n) => MENUS[n].key === e.key.toLowerCase());
@@ -1236,6 +1247,8 @@ window.addEventListener('keydown', (e) => {
       return;
     }
   }
+  // F1：Readme を開く（mde と同じ。検索と置換等のダイアログでの F1 は、ホスト側の Program.Main で受ける）
+  if ('F1' === e.key && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); commands.readme(); return; }
   // F12：開発者ツール（画面側の調査・デバッグ用）。ブラウザ用のショートカットは無効にしてあるため、ホストに開いてもらう
   if ('F12' === e.key && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); send({ cmd: 'devTools' }); return; }
   // 検証用：Ctrl+Shift+F12 で IME をオンにする（ホスト側の ForceImeOn 参照）

@@ -10,11 +10,12 @@
   <div id="app">
     <header id="menubar">
       <!-- メニューの項目は main.js の MENUS（ファイル：新規・開く・フォルダを開く・保存・PDFに書き出し等、
-           表示：フォルダ・アウトライン・ステータスバーの表示の切り替え、ソースモード、段落中の改行） -->
+           表示：フォルダ・アウトライン・ステータスバーの表示の切り替え、ソースモード、段落中の改行、
+           ヘルプ：Readmeを開く・バージョン情報） -->
       <button id="menu-file" title="ファイル (Alt+F)">ファイル(F)</button>
       <button id="menu-view" title="表示 (Alt+V)">表示(V)</button>
       <button data-cmd="find" title="検索と置換 (Ctrl+F)">検索と置換</button>
-      <button data-cmd="about" title="バージョン情報">バージョン情報</button>
+      <button id="menu-help" title="ヘルプ (Alt+H)">ヘルプ(H)</button>
     </header>
     <main id="body">
       <!-- フォルダビュー（「ファイル」→「フォルダを開く...」で開いた時だけ表示する。main.js・folder.js） -->
