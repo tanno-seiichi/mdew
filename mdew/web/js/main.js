@@ -10,14 +10,16 @@
 //                {cmd:'openImage', src} / {cmd:'exportPdf', name} / {cmd:'pdfMargin'} /
 //                {cmd:'openRecent', path, newWindow} / {cmd:'clearRecent'} / {cmd:'openRecentFolder', path, relPath, newWindow} /
 //                {cmd:'clearRecentFolders'} / {cmd:'close'} / {cmd:'openReadme'} /
-//                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs}
+//                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs} /
+//                {cmd:'tableSizeDialog'} / {cmd:'linkDialog'}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
 //                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug, tempDir} /
 //                {cmd:'folderOpened', root, name} / {cmd:'dirList', path, dirs, files} /
 //                {cmd:'folderFiles', reqId, files:[{path, text}]} / {cmd:'savedAll', saved, failed:[{path, message}]} /
 //                {cmd:'findCommand', action, query, replacement, folder, matchCase, regex, index} /
-//                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls}
+//                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls} /
+//                {cmd:'tableSize', rows, cols} / {cmd:'linkUrl', url}
 import { Editor, showMenu } from './editor.js';
 import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
@@ -56,6 +58,10 @@ function send(a_msg) {
 }
 
 /** 編集部分（editor.js）。変更・画像の貼り付け・リンクの操作は、ここで受け取ってホストとやり取りする。 */
+/** 右クリックの「表を挿入…」で、表を置く位置（右クリックした段落を含む最上位のブロック。ホストの tableSize を待つ間だけ）。 */
+let tableAnchor = null;
+/** 右クリックの「リンクにする…」で、リンクにする選択範囲（ホストの linkUrl を待つ間だけ）。 */
+let linkRange = null;
 const editor = new Editor($('doc'), {
   onChange: () => {
     setDirty(true);
@@ -72,6 +78,29 @@ const editor = new Editor($('doc'), {
   },
   imageFileUrl: (a_img) => imageFileUrl(a_img),
   importImages: (a_srcs) => importImages(a_srcs),
+  // 右クリックの「表を挿入…」：行数・列数のダイアログはホスト側（dialog\TableSizeDialog）で出す。挿入する位置は、
+  // 結果（tableSize）が届くまで覚えておく。ブラウザ単体で開いた時（動作確認用）は 3行×3列で挿入する
+  onInsertTable: (a_anchor) => {
+    if (!host) {
+      editor.insertTable(a_anchor, 3, 3);
+      return;
+    }
+    tableAnchor = a_anchor;
+    send({ cmd: 'tableSizeDialog' });
+  },
+  // 右クリックの「リンクにする…」：URL を入力するダイアログはホスト側（dialog\LinkInputDialog）で出す。選んでいた範囲は、
+  // 結果（linkUrl）が届くまで覚えておく。ブラウザ単体で開いた時（動作確認用）は prompt で聞く
+  onMakeLink: (a_range) => {
+    if (!host) {
+      const url = (prompt('リンク先のURLを入力してください') || '').trim();
+      if (url) editor.makeLink(a_range, url);
+      return;
+    }
+    linkRange = a_range;
+    send({ cmd: 'linkDialog' });
+  },
+  // 右クリックの「ソースモードに切り替え」
+  onToggleSource: () => setSourceMode(true),
   onPasteImage: (a_file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -797,6 +826,34 @@ sourceArea.addEventListener('input', () => {
 });
 sourceArea.addEventListener('scroll', () => { sourceBackdrop.scrollTop = sourceArea.scrollTop; });
 
+// ソースモードの右クリック：切り取り・コピー・貼り付け・すべて選択と、「Markdownモードに切り替え」（mde と同じ）
+sourceArea.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const hasSelection = sourceArea.selectionStart !== sourceArea.selectionEnd;
+  showMenu(e.clientX, e.clientY, [
+    { label: '切り取り', key: 'Ctrl+X', disabled: !hasSelection, run: () => document.execCommand('cut') },
+    { label: 'コピー', key: 'Ctrl+C', disabled: !hasSelection, run: () => document.execCommand('copy') },
+    { label: '貼り付け', key: 'Ctrl+V', run: () => pasteIntoSource() },
+    null,
+    { label: 'すべて選択', key: 'Ctrl+A', run: () => sourceArea.select() },
+    null,
+    { label: 'Markdownモードに切り替え', run: () => setSourceMode(false) },
+  ], (a_item) => a_item.run());
+});
+
+/** ソースモードの右クリックの「貼り付け」：クリップボードの文字を、そのまま入力欄に貼る（元に戻せるよう、入力として入れる）。 */
+async function pasteIntoSource() {
+  let text;
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    alert('クリップボードを読み取れませんでした。Ctrl+V で貼り付けてください。');
+    return;
+  }
+  sourceArea.focus();
+  if (text) document.execCommand('insertText', false, text);
+}
+
 /** ソースモードのアウトライン：ソースの見出しの行（# で始まる行。コードブロックの中は除く）の一覧。 */
 function buildSourceOutline() {
   const list = $('outline-list');
@@ -1434,6 +1491,16 @@ if (host) {
       // 最近使ったファイル・フォルダの一覧（開いた・保存した時、ウィンドウが手前に来た時に届く）
       state.recentFiles = msg.files || [];
       state.recentFolders = msg.folders || [];
+    } else if ('tableSize' === msg.cmd) {
+      // 右クリックの「表を挿入…」のダイアログを閉じた（行数・列数が 0 なら取りやめ）
+      const anchor = tableAnchor;
+      tableAnchor = null;
+      if (msg.rows > 0 && msg.cols > 0 && !state.sourceMode) editor.insertTable(anchor, msg.rows, msg.cols);
+    } else if ('linkUrl' === msg.cmd) {
+      // 右クリックの「リンクにする…」のダイアログを閉じた（url が空なら取りやめ）
+      const range = linkRange;
+      linkRange = null;
+      if (msg.url && !state.sourceMode) editor.makeLink(range, msg.url);
     } else if ('pdfExported' === msg.cmd) {
       // PDF に書き出し終わった（キャンセルした場合も）。印刷用の要素を空にする
       exportingPdf = false;

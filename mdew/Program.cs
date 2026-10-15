@@ -273,6 +273,14 @@ namespace mdew
                 case "pdfMargin":
                     ShowPdfMarginDialog();
                     break;
+                case "tableSizeDialog":
+                    // 右クリックのメニュー「表を挿入…」
+                    ShowTableSizeDialog();
+                    break;
+                case "linkDialog":
+                    // 右クリックのメニュー「リンクにする…」
+                    ShowLinkDialog();
+                    break;
                 case "copyHtml":
                     CopyHtml(root.GetProperty("html").GetString(), root.GetProperty("text").GetString());
                     break;
@@ -694,6 +702,29 @@ namespace mdew
             {
                 Post(new { cmd = "pdfExported", ok });
             }
+        }
+
+        /// <summary>右クリックのメニュー「表を挿入…」：行数・列数を指定するダイアログ（mde と同じ）を出し、結果を HTML 側に
+        /// tableSize で知らせる（表は HTML 側で、右クリックした段落の後ろに挿入する）。</summary>
+        private void ShowTableSizeDialog()
+        {
+            var tableDialog = new dialog.TableSizeDialog { Owner = this };
+            bool ok = true == tableDialog.ShowDialog();
+            // ダイアログを閉じた後、すぐに表の中へ書けるよう、編集領域にキーボードの入力先を戻す
+            m_webView.Focus();
+            // 取りやめた時も知らせる（HTML 側で、挿入する位置として覚えておいた段落を忘れるため）。行数・列数が 0 なら取りやめ
+            Post(new { cmd = "tableSize", rows = ok ? tableDialog.Rows : 0, cols = ok ? tableDialog.Columns : 0 });
+        }
+
+        /// <summary>右クリックのメニュー「リンクにする…」：リンク先の URL を入力するダイアログ（mde と同じ）を出し、結果を
+        /// HTML 側に linkUrl で知らせる（リンクは HTML 側で、右クリックした時に選んでいた文字に付ける）。</summary>
+        private void ShowLinkDialog()
+        {
+            var linkDialog = new dialog.LinkInputDialog { Owner = this };
+            bool ok = true == linkDialog.ShowDialog();
+            m_webView.Focus();
+            // 取りやめた時・URL が空の時も知らせる（HTML 側で、覚えておいた選択範囲を忘れるため）。url が空なら取りやめ
+            Post(new { cmd = "linkUrl", url = ok ? linkDialog.Url : "" });
         }
 
         /// <summary>メニュー「PDFの余白を設定…」。設定した余白は、すぐに設定ファイルに保存する（次に書き出す時から使う）。</summary>

@@ -13,7 +13,7 @@
 //  - 貼り付け：文字は Markdown として読み、書式にして貼る（Ctrl+Shift+V は書式なし）。Excel 等の表は表にして貼る。
 //  - コピー：他のアプリ向けの HTML と、mdew どうしで書式を保つ Markdown も一緒にコピーする（clipboard.js）。
 //  - 画像：ダブルクリック・右クリックの「画像を開く」で、既定のアプリで開く（ホストが開く）。
-import { parseBlocks, renderBlock, renderInline, serializeBlock, imageSource } from './markdown.js';
+import { parseBlocks, renderBlock, renderInline, serializeBlock, imageSource, RE_BARE_EMAIL, RE_EMAIL_PREV_CHAR } from './markdown.js';
 import {
   MARKDOWN_MIME, setClipboardData, writeClipboard, lastCopiedMarkdown, buildCopyData, buildExcelCopy, buildTableCopy,
   tableFromHtml, tableFromTsv, rowsToMarkdownTable, imageSourcesInRows, cellMarkdown,
@@ -619,7 +619,50 @@ export class Editor {
 
   /** 入力された文字に応じて、見た目の書式に変換する（applyBlockRule・applyInlineRule）。 */
   applyInputRules() {
-    if (this.applyBlockRule() || this.applyInlineRule()) this.changed();
+    if (this.applyBlockRule() || this.applyInlineRule() || this.linkifyEmailBeforeCaret(true)) this.changed();
+  }
+
+  /**
+   * カーソルの直前に書いたメールアドレスを、mailto のリンク（data-bare。保存する時は書いたまま）にする。
+   * 読み込んだ時と同じ表示にするため（markdown.js の renderInline 参照）、メールアドレスの後ろに空白・句読点等を
+   * 打った時（a_typed）と、Enter を押す直前（!a_typed）に呼ぶ。コード・リンクの中では何もしない。
+   * @param {boolean} a_typed メールアドレスの後ろに1文字打った直後か（その文字と、直前の「.」はリンクに含めない）
+   * @returns {boolean} リンクにしたか
+   */
+  linkifyEmailBeforeCaret(a_typed) {
+    const sel = getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed || 3 !== sel.anchorNode.nodeType || !this.m_root.contains(sel.anchorNode)) {
+      return false;
+    }
+    const node = sel.anchorNode;
+    if (node.parentElement.closest('code,pre,.md-raw,a')) return false;
+    const before = node.data.slice(0, sel.anchorOffset);
+    // 後ろに打った文字（メールアドレスに使えない文字）と、その前の「.」（文の句点）は除く
+    const tail = a_typed ? (before.match(/\.?[^A-Za-z0-9._%+@-]$/) || [null])[0] : '';
+    if (null === tail) return false;
+    const body = before.slice(0, before.length - tail.length);
+    // メールアドレスの始まりの候補：直前がメールアドレスに使えない文字の所
+    const m = body.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/);
+    if (!m) return false;
+    const start = body.length - m[0].length;
+    if (RE_EMAIL_PREV_CHAR.test(body[start - 1] || '')) return false;
+    const email = m[0].match(RE_BARE_EMAIL);
+    if (!email || email[0].length !== m[0].length) return false;
+    this.checkpoint('edit');
+    const after = node.data.slice(sel.anchorOffset);
+    node.data = body.slice(0, start);
+    const link = document.createElement('a');
+    link.setAttribute('href', `mailto:${email[0]}`);
+    link.dataset.bare = '1';
+    link.textContent = email[0];
+    const rest = document.createTextNode(tail + after);
+    node.after(link, rest);
+    const range = document.createRange();
+    range.setStart(rest, tail.length);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
   }
 
   /**
@@ -759,6 +802,8 @@ export class Editor {
     }
     const block = this.currentTextBlock();
     if (!block) return;
+    // Enter の直前に書いたメールアドレスは、mailto のリンクにする（linkifyEmailBeforeCaret）
+    if ('Enter' === key && !e.ctrlKey && !e.altKey && this.linkifyEmailBeforeCaret(false)) this.changed();
     if ('Enter' === key && !e.shiftKey) {
       if (this.onEnter(e, block)) this.changed();
     } else if ('Tab' === key) {
@@ -1037,7 +1082,8 @@ export class Editor {
     const notDragged = down && Math.abs(e.clientX - down.x) < 5 && Math.abs(e.clientY - down.y) < 5;
     if (link && this.m_root.contains(link) && !e.shiftKey && 1 === e.detail && notDragged) {
       e.preventDefault();
-      this.m_handlers.onOpenLink(link.getAttribute('href'));
+      // 文中にそのまま書いたメールアドレスのリンク（data-bare）は、書き直されていても今の文字で開く
+      this.m_handlers.onOpenLink(link.dataset.bare ? `mailto:${link.textContent.trim()}` : link.getAttribute('href'));
       return;
     }
     const box = e.target;
@@ -1049,11 +1095,11 @@ export class Editor {
     }
   }
 
-  // ===== 右クリックのメニュー（切り取り・コピー・貼り付け、文字の書式、表の操作） =====
+  // ===== 右クリックのメニュー（切り取り・コピー・貼り付け、文字の書式、見出し・表の挿入、表の操作、ソースモード） =====
 
   /**
    * 右クリック。ブラウザ標準のメニューの代わりに、自前のメニュー（showMenu）を出す。
-   * 表のセルの上では、表の操作の項目も加える。
+   * 表のセルの上では表の操作の項目を、それ以外では「見出し」「表を挿入…」の項目を加える（mde と同じ）。
    * @param {MouseEvent} e
    */
   onContextMenu(e) {
@@ -1079,7 +1125,28 @@ export class Editor {
       items.push({ label: FORMATS[name].label, key: FORMATS[name].key, checked: state.active, disabled: !state.enabled,
         run: () => this.applyFormat(name) });
     }
+    // リンクにする（mde と同じ。URL を入力するダイアログはホスト側で出す）。選んだ範囲は、URL が届くまで覚えておく
+    const linkRange = this.linkableRange();
+    items.push({ label: 'リンクにする…', disabled: !linkRange, run: () => this.m_handlers.onMakeLink(linkRange) });
     const cell = e.target.closest && e.target.closest('td,th');
+    if (!cell || !this.m_root.contains(cell)) {
+      // 見出し・表を挿入（mde と同じ。表のセルの上では出さない）。対象は右クリックした段落
+      const block = this.contextBlock(e.target);
+      const heading = this.headingTarget(block);
+      items.push(null);
+      if (heading) {
+        const level = /^H[1-6]$/.test(heading.tagName) ? Number(heading.tagName[1]) : 0;
+        items.push({
+          label: level ? `見出し${level}` : '見出し',
+          submenu: [0, 1, 2, 3, 4, 5, 6].map((n) => ({
+            label: n ? `${'#'.repeat(n)} 見出し${n}` : '本文（見出しなし）',
+            checked: n === level,
+            run: () => this.setHeadingLevel(heading, n),
+          })),
+        });
+      }
+      items.push({ label: '表を挿入…', run: () => this.m_handlers.onInsertTable(this.topLevelBlock(block)) });
+    }
     if (cell && this.m_root.contains(cell)) {
       const isHeader = 'TH' === cell.tagName;
       const table = (a_run) => () => {
@@ -1102,7 +1169,147 @@ export class Editor {
       );
     }
     items.push(null, { label: 'すべて選択', key: 'Ctrl+A', run: () => this.selectAll() });
+    items.push(null, { label: 'ソースモードに切り替え', run: () => this.m_handlers.onToggleSource() });
     showMenu(e.clientX, e.clientY, items, (a_item) => a_item.run());
+  }
+
+  /**
+   * 「リンクにする…」を使える選択範囲。1つの段落（見出し・リストの項目・表のセル等）の中で文字を選んでいて、
+   * コードブロック・インラインコード・解釈できない部分・リンクの中でなく、選んだ範囲にリンクを含まない時だけ。
+   * @returns {Range|null} 選択範囲の複製（使えない時は null）
+   */
+  linkableRange() {
+    const sel = getSelection();
+    if (!sel.rangeCount || sel.isCollapsed || !this.m_root.contains(sel.anchorNode) || !this.m_root.contains(sel.focusNode)) {
+      return null;
+    }
+    const elementOf = (a_node) => (3 === a_node.nodeType ? a_node.parentElement : a_node);
+    const anchor = elementOf(sel.anchorNode);
+    const focus = elementOf(sel.focusNode);
+    const block = anchor.closest(TEXT_BLOCK_SELECTOR);
+    if (!block || block !== focus.closest(TEXT_BLOCK_SELECTOR)) return null;
+    if (anchor.closest('pre,code,.md-raw,a') || focus.closest('pre,code,.md-raw,a')) return null;
+    const range = sel.getRangeAt(0);
+    if (range.cloneContents().querySelector('a')) return null;
+    return range.cloneRange();
+  }
+
+  /**
+   * 右クリックのメニューの「リンクにする…」：選んでいた文字をリンクにする（mde と同じ）。カーソルはリンクの後ろに置く。
+   * @param {Range} a_range linkableRange で覚えておいた選択範囲
+   * @param {string} a_url リンク先の URL
+   */
+  makeLink(a_range, a_url) {
+    if (!a_range || a_range.collapsed || !a_url || !this.m_root.contains(a_range.commonAncestorContainer)) return;
+    this.checkpoint('edit');
+    const link = document.createElement('a');
+    link.setAttribute('href', a_url);
+    link.appendChild(a_range.extractContents());
+    a_range.insertNode(link);
+    this.focus();
+    const range = document.createRange();
+    range.setStartAfter(link);
+    range.collapse(true);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    this.changed();
+  }
+
+  /**
+   * 右クリックした場所の、文字を書く単位の要素（段落・見出し等）。段落の外（余白等）なら、カーソルのある要素。
+   * @param {EventTarget} a_target 右クリックした要素
+   * @returns {HTMLElement|null}
+   */
+  contextBlock(a_target) {
+    const el = a_target && 1 === a_target.nodeType ? a_target : a_target && a_target.parentElement;
+    const block = el && el.closest && el.closest(TEXT_BLOCK_SELECTOR);
+    return block && this.m_root.contains(block) ? block : this.currentTextBlock();
+  }
+
+  /**
+   * 見出しのレベルを変えられる要素か（最上位、または引用の中の、段落・見出し。リストの項目・コードブロック等は変えない）。
+   * @param {HTMLElement|null} a_block 文字を書く単位の要素
+   * @returns {HTMLElement|null} 変えられるなら a_block、変えられないなら null
+   */
+  headingTarget(a_block) {
+    if (!a_block || !/^(P|H[1-6])$/.test(a_block.tagName)) return null;
+    const parent = a_block.parentNode;
+    return parent === this.m_root || 'BLOCKQUOTE' === parent.tagName ? a_block : null;
+  }
+
+  /**
+   * a_block を含む、最上位のブロック（表を挿入する時に、その後ろに置くため）。
+   * @param {HTMLElement|null} a_block 文字を書く単位の要素
+   * @returns {HTMLElement|null}
+   */
+  topLevelBlock(a_block) {
+    let block = a_block;
+    while (block && block.parentNode !== this.m_root) block = block.parentNode;
+    return block || null;
+  }
+
+  /**
+   * 右クリックのメニューの「見出し」：段落・見出しの見出しのレベルを変える（0 は本文。mde と同じ）。
+   * カーソルがその要素の中にあれば、同じ文字の位置に戻す。
+   * @param {HTMLElement} a_block 段落・見出し（headingTarget）
+   * @param {number} a_level 見出しのレベル（0〜6）
+   */
+  setHeadingLevel(a_block, a_level) {
+    const tag = a_level ? `H${a_level}` : 'P';
+    if (!a_block.isConnected || a_block.tagName === tag) return;
+    this.checkpoint('edit');
+    const sel = getSelection();
+    let offset = null;
+    if (sel.rangeCount && a_block.contains(sel.anchorNode)) {
+      const range = document.createRange();
+      range.setStart(a_block, 0);
+      range.setEnd(sel.anchorNode, sel.anchorOffset);
+      offset = range.toString().length;
+    }
+    const el = document.createElement(tag);
+    el.append(...a_block.childNodes);
+    a_block.replaceWith(el);
+    if (null !== offset) this.restoreCaretInside(el, offset);
+    else this.placeCaretAtStart(el);
+    this.changed();
+  }
+
+  /**
+   * 右クリックのメニューの「表を挿入…」：行数（見出しの行を含む）・列数を指定した空の表を挿入する（mde と同じ）。
+   * 右クリックした段落（を含む最上位のブロック）の後ろに置く。その段落が空なら、段落を表に置き換える。
+   * 表の後ろに段落が無ければ、続けて書けるよう空の段落も置く。カーソルは見出しの行の最初のセルに置く。
+   * @param {HTMLElement|null} a_anchor 右クリックした段落を含む最上位のブロック（無い・消えていれば文書の最後に置く）
+   * @param {number} a_rows 行数（見出しの行を含む）
+   * @param {number} a_cols 列数
+   */
+  insertTable(a_anchor, a_rows, a_cols) {
+    this.checkpoint('edit');
+    const table = document.createElement('table');
+    const head = table.createTHead().insertRow();
+    for (let c = 0; c < a_cols; c++) head.appendChild(this.newCell(table, -1, true));
+    if (a_rows > 1) {
+      const body = table.createTBody();
+      for (let r = 1; r < a_rows; r++) {
+        const tr = body.insertRow();
+        for (let c = 0; c < a_cols; c++) tr.appendChild(this.newCell(table, -1, false));
+      }
+    }
+    const anchor = a_anchor && a_anchor.parentNode === this.m_root ? a_anchor : null;
+    const isEmptyParagraph = (a_el) => 'P' === a_el.tagName && '' === a_el.textContent.replace(/\u200b/g, '').trim()
+      && !a_el.querySelector('img');
+    if (anchor && isEmptyParagraph(anchor)) anchor.replaceWith(table);
+    else if (anchor) anchor.after(table);
+    else this.m_root.appendChild(table);
+    const next = table.nextElementSibling;
+    if (!next || 'P' !== next.tagName) {
+      const p = document.createElement('p');
+      p.appendChild(document.createElement('br'));
+      table.after(p);
+    }
+    this.focus();
+    this.placeCaretAtStart(head.cells[0]);
+    this.changed();
   }
 
   /** 文書全体を選択する。 */

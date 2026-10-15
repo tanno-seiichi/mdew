@@ -391,10 +391,13 @@ export function renderBlock(a_block) {
  * 段落などの中の書式（太字・リンク・画像・インラインコード等）を HTML にする。
  * CommonMark の規則を簡略化したもの。閉じ側の記号が見つからない場合は、記号を文字のまま表示する。
  * 先頭から1文字ずつ見て、書式の始まりの記号があればその書式として読み、無ければ文字として出力する。
+ * 文中にそのまま書かれたメールアドレスは、mailto のリンクとして表示する（GitHub と同じ。保存する時は書いたままにする。
+ * data-bare="1" の印を付け、serializeInline でリンクの文字だけを書き出す）。
  * @param {string} a_text 段落・見出し・セル等の Markdown の文字列（段落内の改行を含んでよい）
+ * @param {boolean} [a_inLink] リンクの文字の中か（リンクの中のメールアドレスは、リンクにしない）
  * @returns {string} HTML
  */
-export function renderInline(a_text) {
+export function renderInline(a_text, a_inLink = false) {
   let out = '';
   let i = 0;
   const s = a_text;
@@ -437,7 +440,7 @@ export function renderInline(a_text) {
         if (isImage) {
           out += `<img ${imageSrcAttrs(link.url)} alt="${escapeHtml(unescapeMd(link.text))}"${title}>`;
         } else {
-          out += `<a href="${escapeHtml(link.url)}"${title}>${renderInline(link.text)}</a>`;
+          out += `<a href="${escapeHtml(link.url)}"${title}>${renderInline(link.text, true)}</a>`;
         }
         i = link.end;
         continue;
@@ -470,7 +473,7 @@ export function renderInline(a_text) {
       if ((m = rest.match(/^<u>/i))) {
         const close = s.toLowerCase().indexOf('</u>', i + 3);
         if (close > i) {
-          out += `<u>${renderInline(s.slice(i + 3, close))}</u>`;
+          out += `<u>${renderInline(s.slice(i + 3, close), a_inLink)}</u>`;
           i = close + 4;
           continue;
         }
@@ -480,8 +483,17 @@ export function renderInline(a_text) {
     if ('*' === ch || '_' === ch || '~' === ch || '=' === ch) {
       const em = parseEmphasisAt(s, i);
       if (em) {
-        out += `<${em.tag}>${renderInline(em.inner)}</${em.tag}>`;
+        out += `<${em.tag}>${renderInline(em.inner, a_inLink)}</${em.tag}>`;
         i = em.end;
+        continue;
+      }
+    }
+    // そのまま書かれたメールアドレス（前がメールアドレス・URL の一部になる文字でない所から始まるもの）
+    if (!a_inLink && '@' !== ch && !RE_EMAIL_PREV_CHAR.test(s[i - 1] || '')) {
+      const m = s.slice(i).match(RE_BARE_EMAIL);
+      if (m) {
+        out += `<a href="mailto:${escapeHtml(m[0])}" data-bare="1">${escapeHtml(m[0])}</a>`;
+        i += m[0].length;
         continue;
       }
     }
@@ -490,6 +502,14 @@ export function renderInline(a_text) {
   }
   return out;
 }
+
+/**
+ * 文中にそのまま書かれたメールアドレス（文字列の先頭から）。ドメインは「.」で区切られた2つ以上の部分で、最後は英字2文字以上。
+ * 終わりの「.」（文の句点）は含めない。
+ */
+export const RE_BARE_EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}(?![A-Za-z0-9-]|\.[A-Za-z0-9])/;
+/** メールアドレスの直前にあると、そこからはメールアドレスとみなさない文字（メールアドレス・URL の一部になる文字）。 */
+export const RE_EMAIL_PREV_CHAR = /[A-Za-z0-9._%+\-/@]/;
 
 /**
  * インラインコードの閉じ側（開き側と同じ数のバッククォート）を探す。
@@ -770,7 +790,10 @@ export function serializeInline(a_el) {
       }
       case 'A': {
         const href = node.getAttribute('href') || '';
-        if (node.dataset.auto) {
+        if (node.dataset.bare) {
+          // 文中にそのまま書かれていたメールアドレス（renderInline 参照）：書かれたままの文字を書き出す
+          out += node.textContent;
+        } else if (node.dataset.auto) {
           // <https://...> や <name@example.com> の形で書かれていたリンク
           const text = node.textContent;
           out += `<${href.startsWith('mailto:') && !text.startsWith('mailto:') ? text : href}>`;
