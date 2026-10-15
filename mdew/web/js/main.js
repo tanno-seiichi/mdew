@@ -1,14 +1,14 @@
 // mdew：画面全体の動きと、C# 側ホスト（WebView2）とのやり取り。
 //
 // ホストとのメッセージ（JSON）:
-//   web → host : {cmd:'ready'} / {cmd:'open'} / {cmd:'save', markdown, saveAs, images} /
+//   web → host : {cmd:'ready'} / {cmd:'open', newWindow} / {cmd:'save', markdown, saveAs, images} /
 //                {cmd:'dirty', value} / {cmd:'newWindow'} / {cmd:'pasteImage', id, type, data} / {cmd:'imeOn'} /
 //                {cmd:'openUrl', url} / {cmd:'openRelative', path} / {cmd:'devTools'} / {cmd:'about'} /
-//                {cmd:'openFolder', relPath} / {cmd:'listDir', path} / {cmd:'openPath', path} /
+//                {cmd:'openFolder', relPath, newWindow} / {cmd:'listDir', path} / {cmd:'openPath', path} /
 //                {cmd:'readFolderFiles', reqId, root} / {cmd:'saveAll', files:[{path, markdown, images, current}]} /
 //                {cmd:'openFind'} / {cmd:'findUpdate', status | results, selectedIndex | step} /
 //                {cmd:'openImage', src} / {cmd:'exportPdf', name} / {cmd:'pdfMargin'} /
-//                {cmd:'openRecent', path} / {cmd:'clearRecent'} / {cmd:'openRecentFolder', path, relPath} /
+//                {cmd:'openRecent', path, newWindow} / {cmd:'clearRecent'} / {cmd:'openRecentFolder', path, relPath, newWindow} /
 //                {cmd:'clearRecentFolders'} / {cmd:'close'} / {cmd:'openReadme'} /
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
@@ -531,6 +531,7 @@ function openFile(a_path) {
  */
 function openRecent(a_path) {
   if (state.path && pathKey(a_path) === pathKey(state.path)) return;
+  if (opensInNewWindow()) { send({ cmd: 'openRecent', path: a_path, newWindow: true }); return; }
   if (mustConfirmDiscard() && !confirm('保存されていない変更があります。破棄して別のファイルを開きますか？')) return;
   send({ cmd: 'openRecent', path: a_path });
 }
@@ -541,12 +542,21 @@ function openRecent(a_path) {
  * @param {string} a_path フォルダのフルパス
  */
 function openRecentFolder(a_path) {
+  // このウィンドウで既に開いているフォルダなら、何もしない（同じフォルダを2つのウィンドウで開かないように）
+  if (folderView.isOpen && pathKey(a_path) === pathKey(folderView.rootPath)) return;
+  if (opensInNewWindow()) { send({ cmd: 'openRecentFolder', path: a_path, newWindow: true }); return; }
   if (hasUnsaved() && !confirm('保存されていない変更があります。破棄して別のフォルダを開きますか？')) return;
   send({ cmd: 'openRecentFolder', path: a_path, relPath: folderView.relativePath(state.path) });
 }
 
-/** メニュー「ファイル」→「フォルダを開く...」：保存していない変更があれば確認してから、フォルダを選ぶダイアログを出してもらう。 */
-function doOpenFolder() {
+/**
+ * メニュー「ファイル」→「フォルダを開く...」・フォルダビューの「…」ボタン：保存していない変更があれば確認してから、
+ * フォルダを選ぶダイアログを出してもらう。
+ * @param {boolean} [a_fromMenu] メニューからか（メニューからの時だけ、opensInNewWindow なら新しいウィンドウで開く。
+ *   フォルダビューの「…」ボタンは、このウィンドウのフォルダを切り替える）
+ */
+function doOpenFolder(a_fromMenu = false) {
+  if (a_fromMenu && opensInNewWindow()) { send({ cmd: 'openFolder', newWindow: true }); return; }
   if (hasUnsaved() && !confirm('保存されていない変更があります。破棄して別のフォルダを開きますか？')) return;
   send({ cmd: 'openFolder', relPath: folderView.relativePath(state.path) });
 }
@@ -944,8 +954,19 @@ function loadDocument(a_markdown) {
 function doNew() {
   send({ cmd: 'newWindow' });
 }
-/** 開く：未保存の変更があれば確認してから、ホストにファイルを開くダイアログを出してもらう。 */
+/**
+ * メニューからファイル・フォルダを開く時（開く・最近使ったファイル・フォルダを開く・最近使ったフォルダ）に、
+ * 新しいウィンドウで開くか。フォルダを開いている時や、ファイルを開いている・何か書いてある時は、今の内容を
+ * 残したまま別のウィンドウで開く。何も書いていない新規のウィンドウなら、このウィンドウで開く。
+ * @returns {boolean}
+ */
+function opensInNewWindow() {
+  return folderView.isOpen || !!state.path || '' !== currentMarkdown().trim();
+}
+/** 開く：ホストにファイルを開くダイアログを出してもらう（opensInNewWindow なら、選んだファイルを新しいウィンドウで
+ * 開く。このウィンドウで開く時は、未保存の変更があれば先に確認する）。 */
 function doOpen() {
+  if (opensInNewWindow()) { send({ cmd: 'open', newWindow: true }); return; }
   if (mustConfirmDiscard() && !confirm('保存されていない変更があります。破棄して別のファイルを開きますか？')) return;
   send({ cmd: 'open' });
 }
@@ -1017,7 +1038,7 @@ const commands = {
   open: doOpen,
   save: () => doSave(false),
   saveAs: () => doSave(true),
-  openFolder: doOpenFolder,
+  openFolder: () => doOpenFolder(true),
   saveAll: doSaveAll,
   find: openFindWindow,
   exportPdf: doExportPdf,

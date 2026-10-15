@@ -191,7 +191,17 @@ namespace mdew
                     };
                     if (true == ofd.ShowDialog(this))
                     {
-                        LoadFile(ofd.FileName);
+                        // newWindow：このウィンドウでフォルダ・ファイルを開いている時は、新しいウィンドウで開く（main.js の opensInNewWindow）。
+                        // ただし、このウィンドウで開いているファイルそのものを選んだ時は、このウィンドウで開き直す（同じファイルを2つの
+                        // ウィンドウで開かないように）
+                        if (IsNewWindowRequested(root) && !string.Equals(ofd.FileName, m_currentPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            OpenNewWindow(ofd.FileName);
+                        }
+                        else
+                        {
+                            LoadFile(ofd.FileName);
+                        }
                     }
                     break;
                 case "save":
@@ -234,7 +244,7 @@ namespace mdew
                     break;
                 case "openFolder":
                     OpenFolder(root.TryGetProperty("relPath", out JsonElement relElement) && JsonValueKind.String == relElement.ValueKind
-                        ? relElement.GetString() : null);
+                        ? relElement.GetString() : null, IsNewWindowRequested(root));
                     break;
                 case "listDir":
                     ListDirectory(root.GetProperty("path").GetString());
@@ -270,7 +280,7 @@ namespace mdew
                     ImportImages(root.GetProperty("id").GetInt32(), root.GetProperty("srcs"));
                     break;
                 case "openRecent":
-                    OpenRecentFile(root.GetProperty("path").GetString());
+                    OpenRecentFile(root.GetProperty("path").GetString(), IsNewWindowRequested(root));
                     break;
                 case "clearRecent":
                     ClearRecentFiles();
@@ -278,7 +288,7 @@ namespace mdew
                 case "openRecentFolder":
                     OpenRecentFolder(root.GetProperty("path").GetString(),
                         root.TryGetProperty("relPath", out JsonElement recentRel) && JsonValueKind.String == recentRel.ValueKind
-                            ? recentRel.GetString() : null);
+                            ? recentRel.GetString() : null, IsNewWindowRequested(root));
                     break;
                 case "clearRecentFolders":
                     ClearRecentFolders();
@@ -462,11 +472,13 @@ namespace mdew
         /// （移動・削除された）場合は、そのことを知らせて一覧から消す。保存していない変更の確認は、HTML 側で済ませている。</summary>
         /// <param name="a_folder">フォルダのパス。</param>
         /// <param name="a_relPath">今のファイルの、今のフォルダからの相対パス（OpenFolder と同じ。無ければ null）。</param>
-        private void OpenRecentFolder(string a_folder, string a_relPath)
+        /// <param name="a_newWindow">新しいウィンドウで開くか（main.js の opensInNewWindow）。</param>
+        private void OpenRecentFolder(string a_folder, string a_relPath, bool a_newWindow)
         {
             if (Directory.Exists(a_folder))
             {
-                OpenFolderPath(a_folder, a_relPath);
+                if (a_newWindow) OpenNewWindow(a_folder);
+                else OpenFolderPath(a_folder, a_relPath);
                 return;
             }
             var settings = AppSettings.Load();
@@ -513,11 +525,13 @@ namespace mdew
         /// <summary>最近使ったファイルを開く。ファイルが無い（移動・削除された）場合は、そのことを知らせて一覧から消す（mde と同じ）。
         /// 保存していない変更の確認は、HTML 側で済ませている。</summary>
         /// <param name="a_path">ファイルのパス。</param>
-        private void OpenRecentFile(string a_path)
+        /// <param name="a_newWindow">新しいウィンドウで開くか（main.js の opensInNewWindow）。</param>
+        private void OpenRecentFile(string a_path, bool a_newWindow)
         {
             if (File.Exists(a_path))
             {
-                LoadFile(a_path);
+                if (a_newWindow) OpenNewWindow(a_path);
+                else LoadFile(a_path);
                 return;
             }
             var settings = AppSettings.Load();
@@ -790,14 +804,30 @@ namespace mdew
         /// 同じ相対パスのファイルがあればそれを、無ければフォルダの直下の最初のファイル。どちらも無ければ新規の文書）。
         /// 保存していない変更の確認は、HTML 側でダイアログを出す前に済ませている。</summary>
         /// <param name="a_relPath">今のファイルの、今のフォルダからの相対パス（フォルダを開いていない・新規の文書は null）。</param>
-        private void OpenFolder(string a_relPath)
+        /// <param name="a_newWindow">選んだフォルダを新しいウィンドウで開くか（main.js の opensInNewWindow）。</param>
+        private void OpenFolder(string a_relPath, bool a_newWindow)
         {
             var dialog = new OpenFolderDialog { Title = "フォルダを開く" };
             if (true != dialog.ShowDialog(this))
             {
                 return;
             }
+            if (a_newWindow)
+            {
+                // 新しいウィンドウは、起動時引数のフォルダとして開く（OpenStartupPath → OpenFolderPath）
+                OpenNewWindow(dialog.FolderName);
+                return;
+            }
             OpenFolderPath(dialog.FolderName, a_relPath);
+        }
+
+        /// <summary>メニューからファイル・フォルダを開く要求（open・openFolder・openRecent・openRecentFolder）で、
+        /// 新しいウィンドウで開くよう指定されているか（newWindow: true。main.js の opensInNewWindow）。</summary>
+        /// <param name="a_message">HTML 側から届いたメッセージ。</param>
+        /// <returns>新しいウィンドウで開くなら true。</returns>
+        private static bool IsNewWindowRequested(JsonElement a_message)
+        {
+            return a_message.TryGetProperty("newWindow", out JsonElement value) && JsonValueKind.True == value.ValueKind;
         }
 
         /// <summary>フォルダを開く（HTML 側に folderOpened を送ってから、そのフォルダのファイルを1つ開く）。

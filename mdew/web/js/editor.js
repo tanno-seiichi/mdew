@@ -1728,7 +1728,7 @@ function detectBulletMarker(a_markdown) {
  *   submenu?:object[]}|null)[]} a_items
  *   項目。null は区切り線。key はショートカットの表示、checked は項目の左にチェックの印を付ける（その書式になっている）、
  *   heading は選べない見出し（下の項目のまとまりの名前）、title はマウスを乗せた時に出す説明、
- *   submenu はサブメニューの項目（項目にマウスを乗せると右側に開く。項目の形は a_items と同じ）
+ *   submenu はサブメニューの項目（項目をクリックすると右側に開く。項目の形は a_items と同じ）
  * @param {(item:object)=>void} a_onSelect 項目が選ばれた時に呼ぶ関数（選ばれた項目を渡す。サブメニューの項目も同じ）
  */
 export function showMenu(a_x, a_y, a_items, a_onSelect) {
@@ -1777,17 +1777,15 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
       // mousedown で既定の動作を止めて、編集中のカーソル位置（選択範囲）を保つ
       button.addEventListener('mousedown', (e) => e.preventDefault());
       if (item.submenu) {
-        // サブメニュー：マウスを乗せる（クリックする）と右側に開く
+        // サブメニュー：クリックした時だけ右側に開く（もう一度クリックすると閉じる）。マウスを乗せただけでは
+        // 開かない（最近使ったファイル等の長いサブメニューが、下の項目へマウスを動かす途中で開いて、
+        // ほかの項目を隠してしまわないように）
         button.classList.add('has-submenu');
-        const open = () => {
-          if (sub && sub.dataset.owner === item.label) return;
-          openSub(button, item);
-        };
-        button.addEventListener('mouseenter', open);
-        button.addEventListener('click', open);
+        button.addEventListener('click', () => {
+          if (sub && sub.dataset.owner === item.label) closeSub();
+          else openSub(button, item);
+        });
       } else {
-        // 親のメニューのほかの項目にマウスを乗せたら、サブメニューを閉じる
-        if (!a_isSub) button.addEventListener('mouseenter', closeSub);
         button.addEventListener('click', () => {
           close();
           a_onSelect(item);
