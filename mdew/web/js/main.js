@@ -99,6 +99,8 @@ const editor = new Editor($('doc'), {
     linkRange = a_range;
     send({ cmd: 'linkDialog' });
   },
+  // 右クリックの「ページトップに戻る」
+  onPageTop: () => scrollToPageTop(),
   // 右クリックの「ソースモードに切り替え」
   onToggleSource: () => setSourceMode(true),
   onPasteImage: (a_file) => {
@@ -294,25 +296,71 @@ function applyOutlineMarks() {
   }
 }
 
+/**
+ * アウトラインで折りたたんでいる見出し（見出しのレベル・文字・同じ見出しの何番目か、から作るキー）。
+ * 入力のたびにアウトラインを作り直しても、ソースモードに切り替えても、折りたたんだままにするため。
+ */
+const collapsedOutline = new Set();
+
 /** アウトラインを作り直す（見出しをクリックすると、その見出しへ移動する）。 */
 function buildOutline() {
   if (state.sourceMode) {
     buildSourceOutline();
     return;
   }
+  renderOutline(editor.headings().map((h) => ({
+    level: Number(h.tagName.substring(1)),
+    text: h.textContent.replace(/\u200b/g, '').trim(),
+    heading: h,
+    jump: () => h.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+  })));
+  applyOutlineMarks();
+}
+
+/**
+ * アウトラインの一覧を作る。下のレベルの見出しを持つ見出しには「▸／▾」を付け、クリックで折りたたむ・広げる
+ * （フォルダビューと同じ。mde のアウトラインと同じく、見出しの階層で折りたたむ）。見出しの文字をクリックすると、
+ * その見出しへ移動する。
+ * @param {{level:number, text:string, heading?:Element, jump:function}[]} a_entries 見出し（文書の順）
+ */
+function renderOutline(a_entries) {
   const list = $('outline-list');
   list.replaceChildren();
   outlineItems = new Map();
-  for (const h of editor.headings()) {
+  const counts = new Map();
+  // 開いている祖先の見出し（レベルと折りたたんでいるか）。折りたたんだ見出しの下の見出しは表示しない
+  const ancestors = [];
+  a_entries.forEach((entry, i) => {
+    const name = entry.text || '(無題)';
+    const base = `${entry.level}\t${name}`;
+    const n = (counts.get(base) || 0) + 1;
+    counts.set(base, n);
+    const key = `${base}\t${n}`;
+    while (ancestors.length && ancestors[ancestors.length - 1].level >= entry.level) ancestors.pop();
+    const hasChildren = i + 1 < a_entries.length && a_entries[i + 1].level > entry.level;
+    const collapsed = hasChildren && collapsedOutline.has(key);
     const li = document.createElement('li');
-    outlineItems.set(h, li);
-    li.textContent = h.textContent.replace(/\u200b/g, '').trim() || '(無題)';
-    li.title = li.textContent; // 幅が足りずに見切れた時も、マウスを乗せれば全体が見えるように
-    li.className = `lv${h.tagName.substring(1)}`;
-    li.addEventListener('click', () => h.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    li.className = `lv${entry.level}`;
+    li.title = name; // 幅が足りずに見切れた時も、マウスを乗せれば全体が見えるように
+    li.hidden = ancestors.some((a) => a.collapsed);
+    const toggle = li.appendChild(document.createElement('span'));
+    toggle.className = 'toggle';
+    if (hasChildren) {
+      toggle.textContent = collapsed ? '▸' : '▾';
+      toggle.title = collapsed ? '広げる' : '折りたたむ';
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (collapsed) collapsedOutline.delete(key);
+        else collapsedOutline.add(key);
+        buildOutline();
+      });
+    }
+    li.appendChild(document.createElement('span')).textContent = name;
+    li.addEventListener('click', entry.jump);
+    if (entry.heading) outlineItems.set(entry.heading, li);
     list.appendChild(li);
-  }
-  applyOutlineMarks();
+    ancestors.push({ level: entry.level, collapsed });
+  });
 }
 
 // ---- リンクを開く ------------------------------------------------------------
@@ -837,9 +885,27 @@ sourceArea.addEventListener('contextmenu', (e) => {
     null,
     { label: 'すべて選択', key: 'Ctrl+A', run: () => sourceArea.select() },
     null,
+    { label: 'ページトップに戻る', run: () => scrollToPageTop() },
     { label: 'Markdownモードに切り替え', run: () => setSourceMode(false) },
   ], (a_item) => a_item.run());
 });
+
+/**
+ * 右クリックの「ページトップに戻る」：文書の先頭を表示し、カーソルも先頭に置く（mde と同じ。カーソルを置かないと、
+ * 続けて文字を打った時に元の位置へ戻ってしまうため）。ソースモードでは入力欄の先頭。
+ */
+function scrollToPageTop() {
+  if (state.sourceMode) {
+    sourceArea.focus();
+    sourceArea.setSelectionRange(0, 0);
+    sourceArea.scrollTop = 0;
+    sourceBackdrop.scrollTop = 0;
+    return;
+  }
+  editor.focus();
+  editor.setCaret({ index: 0, offset: 0 });
+  $('editor-wrap').scrollTop = 0;
+}
 
 /** ソースモードの右クリックの「貼り付け」：クリップボードの文字を、そのまま入力欄に貼る（元に戻せるよう、入力として入れる）。 */
 async function pasteIntoSource() {
@@ -856,9 +922,7 @@ async function pasteIntoSource() {
 
 /** ソースモードのアウトライン：ソースの見出しの行（# で始まる行。コードブロックの中は除く）の一覧。 */
 function buildSourceOutline() {
-  const list = $('outline-list');
-  list.replaceChildren();
-  outlineItems = new Map();
+  const entries = [];
   const text = sourceArea.value;
   let pos = 0;
   let fence = null;
@@ -874,17 +938,17 @@ function buildSourceOutline() {
     if (fence) continue;
     const h = line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/);
     if (!h) continue;
-    const li = document.createElement('li');
-    li.textContent = (h[2] || '').trim() || '(無題)';
-    li.title = li.textContent;
-    li.className = `lv${h[1].length}`;
-    li.addEventListener('click', () => {
-      sourceArea.focus();
-      sourceArea.setSelectionRange(start, start);
-      scrollSourceToTop(start);
+    entries.push({
+      level: h[1].length,
+      text: (h[2] || '').trim(),
+      jump: () => {
+        sourceArea.focus();
+        sourceArea.setSelectionRange(start, start);
+        scrollSourceToTop(start);
+      },
     });
-    list.appendChild(li);
   }
+  renderOutline(entries);
 }
 
 /**
@@ -1143,6 +1207,20 @@ function togglePane(a_class) {
 function isPaneVisible(a_class) {
   return !document.body.classList.contains(a_class);
 }
+/**
+ * ステータスバーの「フォルダを隠す／表示」「アウトラインを隠す／表示」のボタンの文字を、今の表示に合わせる（mde と同じ）。
+ * body のクラス（no-folderpane・no-outline）が変わるたびに呼ばれる（下の MutationObserver）。
+ */
+function updatePaneButtons() {
+  $('status-folder').textContent = isPaneVisible('no-folderpane') ? 'フォルダを隠す' : 'フォルダを表示';
+  $('status-outline').textContent = isPaneVisible('no-outline') ? 'アウトラインを隠す' : 'アウトラインを表示';
+}
+for (const [id, cmd] of [['status-folder', 'toggleFolder'], ['status-outline', 'toggleOutline']]) {
+  // mousedown で既定の動作を止めて、編集中のカーソル位置を保つ
+  $(id).addEventListener('mousedown', (e) => e.preventDefault());
+  $(id).addEventListener('click', () => commands[cmd]());
+}
+new MutationObserver(updatePaneButtons).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 // 前回の表示・非表示を復元する
 try {
   const hidden = JSON.parse(localStorage.getItem(HIDDEN_PANES_KEY) || '[]');

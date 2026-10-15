@@ -1169,7 +1169,9 @@ export class Editor {
       );
     }
     items.push(null, { label: 'すべて選択', key: 'Ctrl+A', run: () => this.selectAll() });
-    items.push(null, { label: 'ソースモードに切り替え', run: () => this.m_handlers.onToggleSource() });
+    items.push(null,
+      { label: 'ページトップに戻る', run: () => this.m_handlers.onPageTop() },
+      { label: 'ソースモードに切り替え', run: () => this.m_handlers.onToggleSource() });
     showMenu(e.clientX, e.clientY, items, (a_item) => a_item.run());
   }
 

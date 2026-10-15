@@ -44,11 +44,13 @@ body { font-family: var(--ui-font); background: #ffffff; color: var(--text); }
 body.no-outline #outline { display: none; } /* メニュー「表示」→「アウトラインを表示」で切り替え */
 .pane-title { padding: 8px 12px 4px; color: #777; font-size: 12px; }
 #outline-list { list-style: none; margin: 0; padding: 0 0 12px; }
-#outline-list li { padding: 3px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#outline-list li { padding: 3px 12px 3px 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #outline-list li:hover { background: #e6e8eb; }
-#outline-list .lv2 { padding-left: 24px; }
-#outline-list .lv3 { padding-left: 36px; }
-#outline-list .lv4, #outline-list .lv5, #outline-list .lv6 { padding-left: 48px; }
+#outline-list .lv2 { padding-left: 16px; }
+#outline-list .lv3 { padding-left: 28px; }
+#outline-list .lv4, #outline-list .lv5, #outline-list .lv6 { padding-left: 40px; }
+/* 折りたたむ・広げる印（▸／▾。フォルダビューと同じ。main.js の renderOutline） */
+#outline-list .toggle { display: inline-block; width: 14px; color: #777; font-size: 11px; }
 
 #editor-wrap { flex: 1; overflow: auto; }
 
@@ -114,6 +116,14 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
   line-height: 18px; min-height: 18px; /* 表示する文字が無い時も高さを変えない */
 }
 body.no-statusbar #statusbar { display: none; } /* メニュー「表示」→「ステータスバーを表示」で切り替え */
+/* フォルダビュー・アウトラインの表示・非表示のボタン（mde と同じ。フォルダのボタンはフォルダを開いている時だけ） */
+#statusbar .status-btn {
+  font: inherit; color: inherit; line-height: 16px; padding: 0 6px; margin: -1px 0;
+  border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: pointer;
+}
+#statusbar .status-btn:hover { background: #e6e8eb; border-color: var(--line); }
+#status-folder { display: none; }
+body.folder-open #status-folder { display: inline-block; }
 #status-dirty { color: #c0392b; min-width: 4em; }
 #status-host { margin-left: auto; }
 #status-link { color: #0b62c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
