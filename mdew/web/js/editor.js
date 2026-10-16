@@ -2151,6 +2151,9 @@ function detectBulletMarker(a_markdown) {
   return best[1] > 0 ? best[0] : '-';
 }
 
+/** 開いているメニュー（showMenu）を閉じる関数（開いていなければ null）。 */
+let s_closeMenu = null;
+
 /** サブメニューを持つ項目にマウスを乗せてから開くまで・ほかの項目へ移ってから閉じるまでの時間（ミリ秒。Windows の
  * メニューの既定値と同じ）。 */
 const SUBMENU_HOVER_DELAY_MS = 400;
@@ -2166,8 +2169,16 @@ const SUBMENU_HOVER_DELAY_MS = 400;
  *   path は label がファイル・フォルダのパスか（幅が足りない時に、名前を残してフォルダの部分を「…」にする）、
  *   submenu はサブメニューの項目（項目をクリックするか、マウスを乗せてしばらくすると右側に開く。項目の形は a_items と同じ）
  * @param {(item:object)=>void} a_onSelect 項目が選ばれた時に呼ぶ関数（選ばれた項目を渡す。サブメニューの項目も同じ）
+ * @param {{keyboard?:boolean, onNavigate?:(dir:number)=>void}} [a_opts] keyboard はキーボードで開いたか（最初の項目を
+ *   選んだ状態で開く）、onNavigate はメニューバーのメニューで、左右の矢印キーで隣のメニューへ移る時に呼ぶ関数
+ *   （dir は右が 1、左が -1。メニューは閉じてから呼ぶ）
+ *
+ * キーボードの操作（Windows のメニューと同じ）：上下の矢印キーで項目を選ぶ、Enter・スペースで実行する（サブメニューを
+ * 持つ項目は開く）、右の矢印キーでサブメニューを開く、左の矢印キーでサブメニューを閉じる、Esc で閉じる。
  */
-export function showMenu(a_x, a_y, a_items, a_onSelect) {
+export function showMenu(a_x, a_y, a_items, a_onSelect, a_opts = {}) {
+  // 開いているメニューがあれば閉じる（キーボード等の受け付けも終える）
+  if (s_closeMenu) s_closeMenu();
   document.querySelectorAll('.md-menu').forEach((m) => m.remove());
   /** 開いているサブメニュー（無ければ null）。 */
   let sub = null;
@@ -2230,8 +2241,11 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
       key.className = 'key';
       key.textContent = item.submenu ? '▸' : item.key || '';
       button.disabled = !!item.disabled;
+      button.menuItem = item;
       // mousedown で既定の動作を止めて、編集中のカーソル位置（選択範囲）を保つ
       button.addEventListener('mousedown', (e) => e.preventDefault());
+      // マウスを乗せた項目を、キーボードで操作する時の選んだ項目にする
+      button.addEventListener('mouseenter', () => setActive(button));
       if (item.submenu) {
         // サブメニュー：クリックすると右側に開く（もう一度クリックすると閉じる）。マウスを乗せた時は、しばらく
         // （SUBMENU_HOVER_DELAY_MS）乗せたままにした時だけ開く（Windows のメニューと同じ。最近使ったファイル等の
@@ -2264,7 +2278,35 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
       }
       el.appendChild(button);
     }
+    // マウスを動かしたら、キーボードで操作している時の表示（kbd）をやめる
+    el.addEventListener('mousemove', () => el.classList.remove('kbd'));
     return el;
+  };
+
+  /**
+   * 項目を、選んだ状態（キーボードで操作する対象）にする。親のメニューの項目を選んだ時は、サブメニューの選択を外す。
+   * @param {HTMLElement} a_button 項目
+   */
+  const setActive = (a_button) => {
+    const owner = a_button.parentElement;
+    owner.querySelectorAll(':scope > button.active').forEach((b) => b.classList.remove('active'));
+    a_button.classList.add('active');
+    if (sub && owner !== sub) sub.querySelectorAll(':scope > button.active').forEach((b) => b.classList.remove('active'));
+  };
+  /** メニューの中の、選んだ項目（無ければ null）。 */
+  const activeOf = (a_el) => a_el.querySelector(':scope > button.active');
+  /**
+   * 選んだ項目を、上下の項目に移す（使えない項目は飛ばす。端まで来たら反対の端へ）。
+   * @param {HTMLElement} a_el メニュー
+   * @param {number} a_dir 下が 1、上が -1
+   */
+  const moveActive = (a_el, a_dir) => {
+    const list = [...a_el.querySelectorAll(':scope > button:not(:disabled)')];
+    if (!list.length) return;
+    const cur = list.indexOf(activeOf(a_el));
+    const next = cur < 0 ? (a_dir > 0 ? 0 : list.length - 1) : (cur + a_dir + list.length) % list.length;
+    setActive(list[next]);
+    list[next].scrollIntoView({ block: 'nearest' });
   };
 
   /**
@@ -2273,7 +2315,7 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
    * @param {HTMLElement} a_button サブメニューを持つ項目
    * @param {object} a_item その項目
    */
-  const openSub = (a_button, a_item) => {
+  const openSub = (a_button, a_item, a_keyboard = false) => {
     closeSub();
     sub = build(a_item.submenu, true);
     sub.dataset.owner = a_item.label;
@@ -2297,6 +2339,11 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     const height = sub.getBoundingClientRect().height;
     sub.style.left = `${toRight ? parent.right - 2 : parent.left + 2 - width}px`;
     sub.style.top = `${Math.max(4, Math.min(r.top - 5, window.innerHeight - height - 4))}px`;
+    if (a_keyboard) {
+      // キーボードで開いた時は、サブメニューの最初の項目を選ぶ
+      sub.classList.add('kbd');
+      moveActive(sub, 1);
+    }
   };
 
   const menu = build(a_items, false);
@@ -2309,12 +2356,63 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     if (!menu.contains(e.target) && !(sub && sub.contains(e.target))) close();
   };
   const onKey = (e) => {
-    if ('Escape' !== e.key) return;
-    // サブメニューが開いていれば、サブメニューだけを閉じる（Windows のメニューと同じ）
-    if (sub) closeSub();
-    else close();
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // 操作の対象：サブメニューの項目を選んでいればサブメニュー、それ以外は親のメニュー
+    const level = sub && activeOf(sub) ? sub : menu;
+    const handled = () => {
+      e.preventDefault();
+      e.stopPropagation();
+      level.classList.add('kbd');
+    };
+    const active = activeOf(level);
+    switch (e.key) {
+      case 'Escape':
+        // サブメニューが開いていれば、サブメニューだけを閉じる（Windows のメニューと同じ）
+        handled();
+        if (sub) closeSub();
+        else close();
+        break;
+      case 'ArrowDown':
+      case 'ArrowUp':
+        handled();
+        moveActive(level, 'ArrowDown' === e.key ? 1 : -1);
+        break;
+      case 'ArrowRight':
+        handled();
+        if (level === menu && active && active.menuItem.submenu) {
+          openSub(active, active.menuItem, true);
+        } else if (a_opts.onNavigate) {
+          close();
+          a_opts.onNavigate(1);
+        }
+        break;
+      case 'ArrowLeft':
+        handled();
+        if (level === sub) {
+          closeSub();
+        } else if (a_opts.onNavigate) {
+          close();
+          a_opts.onNavigate(-1);
+        }
+        break;
+      case 'Enter':
+      case ' ':
+        if (!active) return;
+        handled();
+        if (active.menuItem.submenu) openSub(active, active.menuItem, true);
+        else active.click();
+        break;
+      default:
+    }
   };
+  if (a_opts.keyboard) {
+    // キーボードで開いた時は、最初の項目を選んだ状態にする
+    menu.classList.add('kbd');
+    moveActive(menu, 1);
+  }
+  s_closeMenu = close;
   function close() {
+    if (s_closeMenu === close) s_closeMenu = null;
     clearTimers();
     menu.remove();
     closeSub();
@@ -2322,9 +2420,12 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('blur', close);
   }
+  // キーボードの操作はすぐに受け付ける（開いた直後の矢印キーも効くように）。外のクリック等は、メニューを開いたクリックが
+  // 届き終わってから受け付ける（すでに閉じていれば受け付けない）
+  document.addEventListener('keydown', onKey, true);
   setTimeout(() => {
+    if (!menu.isConnected) return;
     document.addEventListener('mousedown', onOutside, true);
-    document.addEventListener('keydown', onKey, true);
     window.addEventListener('blur', close);
   }, 0);
 }

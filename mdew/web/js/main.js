@@ -1414,21 +1414,76 @@ let menuWasOpen = false;
  * メニューを、ボタンの真下に開く（右クリックのメニューと同じ見た目・操作。editor.js の showMenu）。
  * 別のメニューが開いていれば、それは閉じる。
  * @param {string} a_name メニューの名前（MENUS のキー）
+ * @param {boolean} [a_keyboard] キーボード（Alt+F 等・左右の矢印キー）で開いたか（最初の項目を選んだ状態で開く）
  */
-function showBarMenu(a_name) {
+function showBarMenu(a_name, a_keyboard = false) {
   const def = MENUS[a_name];
   const rect = def.button.getBoundingClientRect();
-  showMenu(rect.left, rect.bottom + 2, def.items(), (a_item) => (a_item.run ? a_item.run() : commands[a_item.cmd]()));
+  showMenu(rect.left, rect.bottom + 2, def.items(), (a_item) => (a_item.run ? a_item.run() : commands[a_item.cmd]()),
+    { keyboard: a_keyboard, onNavigate: (a_dir) => navigateBar(def.button, a_dir) });
   openMenuName = a_name;
+  def.button.classList.add('menu-open');
   // メニューが閉じた（項目を選んだ・外をクリックした・Esc）ことを、メニューの要素が無くなったことで知る
   const menu = document.querySelector('.md-menu');
   new MutationObserver((a_records, a_observer) => {
     if (!menu.isConnected) {
+      def.button.classList.remove('menu-open');
+      // 矢印キーで「検索と置換」を経由して開いた場合等、入力先がどこにも無ければ、編集領域に戻す
+      if (document.activeElement === document.body && !document.querySelector('.md-menu')) editor.focus();
       if (openMenuName === a_name && !document.querySelector('.md-menu')) openMenuName = null;
       a_observer.disconnect();
     }
   }).observe(document.body, { childList: true });
 }
+
+/**
+ * メニューバーのボタンの名前（メニューのボタンは MENUS のキー、「検索と置換」等は data-cmd）。
+ * @param {HTMLElement} a_button メニューバーのボタン
+ * @returns {string}
+ */
+function barButtonName(a_button) {
+  return Object.keys(MENUS).find((n) => MENUS[n].button === a_button) || a_button.dataset.cmd;
+}
+
+/**
+ * メニューバーで、左右の矢印キーで隣のボタンへ移る（Windows のメニューバーと同じ。端まで来たら反対の端へ）。
+ * 移った先がメニューならキーボードで開き、「検索と置換」のようにメニューを持たないボタンなら、選んだ状態にする。
+ * @param {HTMLElement} a_from 今のボタン
+ * @param {number} a_dir 右が 1、左が -1
+ */
+function navigateBar(a_from, a_dir) {
+  const all = [...document.querySelectorAll('#menubar > button')];
+  const next = all[(all.indexOf(a_from) + a_dir + all.length) % all.length];
+  const name = barButtonName(next);
+  if (MENUS[name]) {
+    showBarMenu(name, true);
+  } else {
+    next.classList.add('menu-open');
+    next.focus();
+  }
+}
+// メニューを持たないボタン（「検索と置換」）を矢印キーで選んでいる間：Enter・スペースで実行、左右の矢印キーで隣へ、
+// Esc でやめて編集に戻る
+document.querySelectorAll('#menubar > button[data-cmd]').forEach((button) => {
+  button.addEventListener('blur', () => button.classList.remove('menu-open'));
+  button.addEventListener('keydown', (e) => {
+    if (!button.classList.contains('menu-open')) return;
+    if ('ArrowLeft' === e.key || 'ArrowRight' === e.key) {
+      e.preventDefault();
+      e.stopPropagation();
+      button.blur();
+      navigateBar(button, 'ArrowRight' === e.key ? 1 : -1);
+    } else if ('Escape' === e.key) {
+      e.preventDefault();
+      button.blur();
+      editor.focus();
+    } else if ('Enter' === e.key || ' ' === e.key) {
+      e.preventDefault();
+      button.blur();
+      commands[button.dataset.cmd]();
+    }
+  });
+});
 for (const [name, def] of Object.entries(MENUS)) {
   // ボタンを押した時点で開いていたかを、メニューが閉じられる前（window の capture は document より先）に記録する
   window.addEventListener('mousedown', (e) => {
@@ -1457,7 +1512,7 @@ window.addEventListener('keydown', (e) => {
     const name = Object.keys(MENUS).find((n) => MENUS[n].key === e.key.toLowerCase());
     if (name) {
       e.preventDefault();
-      if (openMenuName !== name) showBarMenu(name);
+      if (openMenuName !== name) showBarMenu(name, true);
       return;
     }
   }
