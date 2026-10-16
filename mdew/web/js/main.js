@@ -403,7 +403,7 @@ function decodeURIComponentSafe(a_text) {
 }
 
 /**
- * 見出しの文字から、リンク先の名前（#以降）を作る。GitHub・Typora 等と同じ規則：
+ * 見出しの文字から、リンク先の名前（#以降）を作る。GitHub 等と同じ規則：
  * 英字は小文字にし、記号（句読点・括弧等）を除き、空白を「-」にする。同じ名前の見出しには -1, -2… を付ける
  * （-1, -2… は jumpToHeading 側で付ける）。
  * @param {string} a_text 見出しの文字

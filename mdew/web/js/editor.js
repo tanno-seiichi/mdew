@@ -686,7 +686,7 @@ export class Editor {
   }
 
   /**
-   * Shift+Enter で入れた改行は、Markdown のソースの改行（1行の終わり）として保存する（mde・Typora と同じ。
+   * Shift+Enter で入れた改行は、Markdown のソースの改行（1行の終わり）として保存する。
    * 印の無い <br> は、ソースに書かれていた「<br>」として保存される）。
    */
   markSoftBreak() {
@@ -1144,7 +1144,7 @@ export class Editor {
     }
     if ('LI' === a_block.tagName && a_block.querySelector(':scope > ul, :scope > ol')) {
       // 入れ子のリストを持つ項目の先頭で BackSpace：項目の文字を前の行につなげ、入れ子の項目も前の項目の下へ移す
-      // （Word・Typora と同じ。ブラウザ標準では文字だけが移り、入れ子のリストを持つ空の項目が残るため）
+      // （Wordと同じ。ブラウザ標準では文字だけが移り、入れ子のリストを持つ空の項目が残るため）
       e.preventDefault();
       this.checkpoint('edit');
       this.mergeIntoPreviousItem(a_block);
@@ -1716,7 +1716,7 @@ export class Editor {
    *  - Excel 等の表（表だけの HTML・タブ区切りの文字）：Markdown の表にして貼る（mde と同じ。表のセルの中と、
    *    コードブロックの中では文字のまま）
    *  - 他のアプリの書式付きの内容（Claude 等のチャット・Web ページ・Word 等の HTML）：見出し・リスト・太字・
-   *    リンク等を Markdown にして貼る（Typora と同じ。clipboard.js の htmlToMarkdown）。書式が無い場合は文字を貼る
+   *    リンク等を Markdown にして貼る（clipboard.js の htmlToMarkdown）。書式が無い場合は文字を貼る
    *  - それ以外：pasteContent（文字は Markdown として読む。画像だけならホストに保存を依頼する）
    * @param {{text:string, html:string, markdown:string|null, image:File|null}} a_data クリップボードの内容
    * @param {boolean} a_plain 書式なしで貼り付けるか
@@ -2106,10 +2106,10 @@ const FORMATS = {
   bold: { label: '太字', key: 'Ctrl+B', command: 'bold', match: (e) => ctrlKey(e, 'b') },
   italic: { label: '斜体', key: 'Ctrl+I', command: 'italic', match: (e) => ctrlKey(e, 'i') },
   underline: { label: '下線', key: 'Ctrl+U', command: 'underline', match: (e) => ctrlKey(e, 'u') },
-  // 取り消し線：Typora・Google ドキュメントと同じ Alt+Shift+5
+  // 取り消し線：Alt+Shift+5
   strike: { label: '取り消し線', key: 'Alt+Shift+5', command: 'strikeThrough',
     match: (e) => e.altKey && e.shiftKey && !e.ctrlKey && 'Digit5' === e.code },
-  // インラインコード：Typora と同じ Ctrl+Shift+`（日本語キーボードでは Ctrl+Shift+@ の位置）
+  // インラインコード：Ctrl+Shift+`（日本語キーボードでは Ctrl+Shift+@ の位置）
   code: { label: 'インラインコード', key: 'Ctrl+Shift+`', tag: 'code',
     match: (e) => e.ctrlKey && e.shiftKey && !e.altKey && ('`' === e.key || 'Backquote' === e.code) },
   mark: { label: 'ハイライト', key: '', tag: 'mark' },

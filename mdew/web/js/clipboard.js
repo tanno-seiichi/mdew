@@ -9,7 +9,7 @@
 //  - 貼り付け：Excel 等からコピーした表（HTML の表・タブ区切りの文字）は、Markdown の表として貼り付ける
 //    （mde と同じ。1つ目の行を見出しの行にする）。
 //  - 貼り付け：他のアプリ（Claude 等のチャット・Web ページ・Word 等）の書式付きの内容（HTML）は、Markdown に
-//    直して貼り付ける（Typora と同じ。htmlToMarkdown）。
+//    直して貼り付ける（htmlToMarkdown）。
 //
 // クリップボードへの書き込みは、copy イベントで行う（writeClipboard。document.execCommand('copy') で起こす）。
 import { serializeBlock, serializeInline, escapeText, imageSource } from './markdown.js';
@@ -697,8 +697,8 @@ const BLOCK_SELECTOR = 'p,div,ul,ol,li,h1,h2,h3,h4,h5,h6,pre,blockquote,table,hr
 const RE_CJK_NEWLINE = /([⺀-鿿豈-﫿＀-￯])[ \t]*\n[ \t\n]*(?=[⺀-鿿豈-﫿＀-￯])/g;
 
 /**
- * 他のアプリ（Claude 等のチャット・Web ページ・Word 等）でコピーした書式付きの内容（HTML）を、Markdown にする
- * （Typora と同じ）。見出し・リスト（入れ子・番号付き・チェックボックス付き）・太字・斜体・取り消し線・下線・
+ * 他のアプリ（Claude 等のチャット・Web ページ・Word 等）でコピーした書式付きの内容（HTML）を、Markdown にする。
+ * 見出し・リスト（入れ子・番号付き・チェックボックス付き）・太字・斜体・取り消し線・下線・
  * マーカー・リンク・インラインコード・コードブロック・引用・表・横線・画像を、Markdown の書き方にする。
  * 文字の色・大きさ等の飾りは捨てる。Word のリスト（mso-list の段落）は、リストにする。
  * 画像は、Web 上の画像（http・https）はそのまま参照し、PC の中の画像（file:///…。Word 等の一時ファイル）は、

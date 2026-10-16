@@ -92,7 +92,7 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 
 - [x] **入れ子の空の項目で Enter を押すと、リストの記号が2つ同じ行に並ぶ**（2026-10-16）
   - 原因：入れ子の空の項目で Enter（Shift+Tab も同じ）を押して1段上に戻ると、後ろの項目がその項目の入れ子になる
-    （Markdown の決まり。Typora 等と同じ）。その時、項目自身の行が無いと「・ ◦ 見出し」のように記号が並び、
+    （Markdown の決まり）。その時、項目自身の行が無いと「・ ◦ 見出し」のように記号が並び、
     カーソルも入れ子の項目（「見出し」）の先頭に置かれていた
   - 項目自身の行（<br>）を作り、カーソルをそこに置く（editor.js の ensureOwnLine・placeCaretAtStart。
     「-」だけの行の下に入れ子がある Markdown を開いた時も同じ。markdown.js の renderBlock）
@@ -103,7 +103,7 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
   - 追記：ユーザーの操作は、入れ子のある項目の先頭で BackSpace だった（ブラウザ標準では文字だけが前の項目に移り、
     入れ子のリストを持つ空の項目が残る）。入れ子のある項目の先頭で BackSpace を押した時は、文字を見た目で1つ上の行
     （前の項目の中の最後の項目・入れ子の先頭なら親の項目）につなげ、入れ子の項目も前の項目の下へ移すようにした
-    （Word・Typora と同じ。editor.js の mergeIntoPreviousItem。最上位のリストの先頭の項目は段落に戻す）
+    （Wordと同じ。editor.js の mergeIntoPreviousItem。最上位のリストの先頭の項目は段落に戻す）
   - あわせて、入れ子を持つ最上位の項目を段落に戻した時（Shift+Tab・空の項目で Enter）に、入れ子の項目が消えていた
     のを直した（段落の後ろにリストとして残す。outdent）
   - mde は、空の項目で Enter を押すとリスト全体から抜ける（後ろの項目は元のまま）ため、この問題は無い
@@ -111,7 +111,7 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 - [x] **他のアプリの書式付きの内容を、Markdown にして貼り付ける**（2026-10-16）
   - Claude のアプリの返答をコピーして貼ると、箇条書きの記号が外れていた。Chromium の文字（text/plain）には
     リストの記号が入らず、これまでは HTML を表の時しか使っていなかったため
-  - HTML を Markdown に直して貼る（Typora と同じ。clipboard.js の htmlToMarkdown）：箇条書き・番号付きリスト（入れ子・
+  - HTML を Markdown に直して貼る（clipboard.js の htmlToMarkdown）：箇条書き・番号付きリスト（入れ子・
     開始番号・チェックボックス）・見出し・太字・斜体・取り消し線・下線・マーカー・リンク・インラインコード・
     コードブロック（言語も）・引用・表・横線・画像（Web 上の画像はそのまま、Word 等の一時ファイルは一時フォルダへコピー）
   - Word のリスト（mso-list の段落）・Google ドキュメントの太字（span の font-weight）にも対応。文字の色等の飾りは捨てる
@@ -222,7 +222,7 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
   - 入力欄の後ろに同じ文字の配置の要素（#source-backdrop）を重ねて、検索の色と行の位置の計算に使っている
 - [x] **検索のウィンドウ・範囲選択の色・画像を開く・Excel 連携・PDF・`<img>` の画像**（2026-10-13）
   - 検索と置換のウィンドウを、mde と同じくメインのウィンドウの外へ動かせる別のウィンドウにした（閉じても隠すだけ）
-  - 範囲選択の色：Typora（#dae3e9）・サクラエディタ（#c1cfe3）に合わせ、淡い青（#c8d6e8。`app.css` の `--selection-bg`）
+  - 範囲選択の色：淡い青（#c8d6e8。`app.css` の `--selection-bg`）
   - 画像のダブルクリック・右クリック「画像を開く」：ホストが参照先をファイルのパスにして既定のアプリで開く
     （Program.cs の OpenImage。画像の拡張子のファイルだけ開く）
   - Excel 連携（`clipboard.js`）：「Excel用にコピー」「表をコピー」は mde の ClipboardHtmlBuilder・TableEditor を移植。
