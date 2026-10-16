@@ -28,7 +28,7 @@ mde の画面を HTML で作り直したアプリケーションです。この�
   - `js\markdown.js`：Markdown の読み込み・書き出し
   - `js\folder.js`：フォルダビュー
   - `js\find.js`：検索と置換
-  - `js\clipboard.js`：Excel 等の他のアプリとのコピー・貼り付け
+  - `js\clipboard.js`：Excel 等の他のアプリとのコピー・貼り付け（書式付きの HTML → Markdown の変換を含む）
 - `msi\`：インストーラー（WiX Toolset 4）のプロジェクト（mde の msi を元にしたもの）
   - `Package.wxs`：製品名・バージョン・アップグレードコード・アイコン等
   - `Directory.wxs`：インストール先のフォルダ構成（`web\js` を含む）
@@ -103,6 +103,8 @@ Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js �
 - 開いているファイルの名前は、タイトルバーに表示します
 - ステータスバーの「停止」「入力遅延」の回数（IME フリーズの検証用）は、Debug ビルドの時だけ表示します
 - 文字の貼り付けは、Markdown として読んで書式（見出し・リスト・表・太字等）にします。
+  他のアプリの書式付きの内容（HTML）は、Markdown に直して貼ります（Typora と同じ。clipboard.js の htmlToMarkdown。
+  見出し・リスト・リンク等のタグが無い HTML は、これまでどおり文字を貼ります。VS Code 等のコードの色付けの HTML も文字のまま）
   書式にしたくない時は「書式なしで貼り付け」（Ctrl+Shift+V・右クリックのメニュー）
 - 「ヘルプ」→「Readmeを開く」（F1）で、実行フォルダの README.md を新しいウィンドウで開きます（mde と同じ。
   README.md はビルド時に実行フォルダへコピーされます。検索と置換等のダイアログでの F1 は、ホスト側の Program.Main で受けます）

@@ -375,7 +375,10 @@ export function renderBlock(a_block) {
       const startAttr = a_block.ordered && 1 !== a_block.startNumber ? ` start="${a_block.startNumber}"` : '';
       const items = a_block.items.map((item) => {
         const [first, ...rest] = item.children;
-        let inner = first && 'paragraph' === first.type ? renderInline(first.text) : (first ? renderBlock(first) : '');
+        // 入れ子のリストから始まる項目（「-」だけの行の下に入れ子の項目がある）は、項目自身の行（<br>）を置く。
+        // 無いと、項目の記号と入れ子のリストの記号が同じ行に並ぶため
+        let inner = first && 'paragraph' === first.type ? renderInline(first.text)
+          : (first ? ('list' === first.type ? '<br>' : '') + renderBlock(first) : '');
         inner += rest.map(renderBlock).join('');
         const box = null === item.task ? '' : `<input type="checkbox" contenteditable="false"${item.task ? ' checked' : ''}>`;
         return `<li${null === item.task ? '' : ' class="task"'}>${box}${inner || '<br>'}</li>`;

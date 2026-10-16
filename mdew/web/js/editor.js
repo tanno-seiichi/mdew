@@ -16,7 +16,7 @@
 import { parseBlocks, renderBlock, renderInline, serializeBlock, imageSource, RE_BARE_EMAIL, RE_EMAIL_PREV_CHAR } from './markdown.js';
 import {
   MARKDOWN_MIME, setClipboardData, writeClipboard, lastCopiedMarkdown, buildCopyData, buildExcelCopy, buildTableCopy,
-  tableFromHtml, tableFromTsv, rowsToMarkdownTable, imageSourcesInRows, cellMarkdown,
+  tableFromHtml, tableFromTsv, rowsToMarkdownTable, imageSourcesInRows, cellMarkdown, htmlToMarkdown,
 } from './clipboard.js';
 
 /** 文字を書く単位の要素（カーソルのある「行」を探す時に使う）。 */
@@ -280,7 +280,18 @@ export class Editor {
   /** 編集した後の共通の処理（末尾の段落を保ち、main.js に変更を知らせる）。 */
   changed() {
     this.ensureTrailingParagraph();
+    this.ensureOwnLines();
     this.m_handlers.onChange();
+  }
+
+  /**
+   * 入れ子のリストだけを持つ空の項目に、項目自身の行を作る（ensureOwnLine）。親の項目の文字を消した時・
+   * 文字のある項目の末尾で Enter を押して入れ子のリストが新しい項目に移った時等、どの編集でできた場合でも、
+   * 項目の記号と入れ子のリストの記号が同じ行に並ばないようにする。日本語の入力の途中では行わない。
+   */
+  ensureOwnLines() {
+    if (this.m_composing) return;
+    for (const list of this.m_root.querySelectorAll('li > :is(ul,ol):first-child, li > input:first-child + :is(ul,ol)')) ensureOwnLine(list.parentElement);
   }
 
   /** 文書の最後が表・コードブロック等の場合、その後ろにカーソルを置けるよう空の段落を置く。 */
@@ -456,6 +467,8 @@ export class Editor {
     // 中身が空だと高さが無くなり、カーソルを置けないため、空の文字は取り除いて <br> を置く
     for (const n of [...a_el.childNodes]) if (3 === n.nodeType && '' === n.data) n.remove();
     if ('' === a_el.textContent && !a_el.querySelector('br,img')) a_el.appendChild(document.createElement('br'));
+    // 入れ子のリストだけを持つ空の項目：項目自身の行（<br>）を作って、そこに置く（入れ子の項目の中に置かない）
+    const ownBreak = 'LI' === a_el.tagName ? ensureOwnLine(a_el) : null;
     const range = document.createRange();
     const box = a_el.firstChild && 'INPUT' === a_el.firstChild.nodeName ? a_el.firstChild : null;
     if (box) {
@@ -469,8 +482,14 @@ export class Editor {
         text.insertData(0, '\u200b');
       }
       range.setStart(text, 1);
+    } else if (ownBreak) {
+      range.setStartBefore(ownBreak);
     } else {
-      const walker = document.createTreeWalker(a_el, NodeFilter.SHOW_TEXT);
+      const walker = document.createTreeWalker(a_el, NodeFilter.SHOW_TEXT, {
+        // リストの項目の場合、入れ子のリストの中の文字には置かない
+        acceptNode: (n) => ('LI' !== a_el.tagName || n.parentElement.closest('li') === a_el
+          ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+      });
       const text = walker.nextNode();
       if (text) range.setStart(text, 0);
       else range.setStart(a_el, 0);
@@ -971,8 +990,9 @@ export class Editor {
     // 後ろの兄弟の項目は、この項目の入れ子として付いていく
     const following = [];
     for (let n = a_li.nextElementSibling; n; n = n.nextElementSibling) following.push(n);
+    let sub = null;
     if (following.length) {
-      const sub = document.createElement(list.tagName.toLowerCase());
+      sub = document.createElement(list.tagName.toLowerCase());
       if (list.dataset.marker) sub.dataset.marker = list.dataset.marker;
       sub.append(...following);
       if (parentLi && 'LI' === parentLi.tagName) a_li.appendChild(sub);
@@ -981,14 +1001,28 @@ export class Editor {
     let result = a_li;
     if (parentLi && 'LI' === parentLi.tagName) {
       parentLi.after(a_li);
+      // 空の項目に後ろの項目が付いてきた場合も、項目自身の行を残す（入れ子のリストと同じ行に並ばないように）
+      ensureOwnLine(a_li);
     } else {
       const p = document.createElement('p');
+      const nested = [];
       for (const child of [...a_li.childNodes]) {
-        if (1 === child.nodeType && ('UL' === child.tagName || 'OL' === child.tagName || 'INPUT' === child.tagName)) continue;
+        if (1 === child.nodeType && 'INPUT' === child.tagName) continue;
+        if (1 === child.nodeType && ('UL' === child.tagName || 'OL' === child.tagName)) {
+          nested.push(child);
+          continue;
+        }
         p.appendChild(child);
       }
       if (!p.firstChild) p.appendChild(document.createElement('br'));
       list.after(p);
+      // 項目の入れ子のリストは、段落の後ろにリストとして残す（消さない）。後ろの項目のリストと同じ種類なら1つにする
+      p.after(...nested);
+      const last = nested[nested.length - 1];
+      if (last && sub && last.nextElementSibling === sub && last.tagName === sub.tagName) {
+        last.append(...sub.children);
+        sub.remove();
+      }
       a_li.remove();
       result = p;
     }
@@ -1046,6 +1080,14 @@ export class Editor {
       this.placeCaretAtStart(a_block);
       return true;
     }
+    if ('LI' === a_block.tagName && a_block.querySelector(':scope > ul, :scope > ol')) {
+      // 入れ子のリストを持つ項目の先頭で BackSpace：項目の文字を前の行につなげ、入れ子の項目も前の項目の下へ移す
+      // （Word・Typora と同じ。ブラウザ標準では文字だけが移り、入れ子のリストを持つ空の項目が残るため）
+      e.preventDefault();
+      this.checkpoint('edit');
+      this.mergeIntoPreviousItem(a_block);
+      return true;
+    }
     if (/^H[1-6]$/.test(a_block.tagName)) {
       // 見出しの先頭で BackSpace：通常の段落に戻す
       e.preventDefault();
@@ -1067,6 +1109,71 @@ export class Editor {
       return true;
     }
     return false;
+  }
+
+  /**
+   * 入れ子のリストを持つ項目の先頭で BackSpace を押した時の処理（入れ子の空の項目で Enter・Shift+Tab を押してできた、
+   * 入れ子のリストだけを持つ空の項目も同じ）。
+   *  - 前に項目がある場合：項目の文字を、見た目で1つ上の行（前の項目の中の最後の項目）の末尾につなげ、入れ子の項目を
+   *    前の項目の入れ子のリストの後ろへ移す。カーソルは、つなげた所に置く
+   *  - 入れ子のリストの先頭の項目の場合：項目の文字を親の項目の文字の後ろにつなげ、入れ子の項目は1段上げて並べる
+   *  - 最上位のリストの先頭の項目の場合：空の項目なら、入れ子の項目をこの項目の位置に1段上げて並べる。文字のある
+   *    項目は、項目の記号を外して段落にする（Shift+Tab と同じ。入れ子の項目は段落の後ろにリストとして残る）
+   * @param {HTMLLIElement} a_li 項目
+   */
+  mergeIntoPreviousItem(a_li) {
+    const isList = (n) => 1 === n.nodeType && ('UL' === n.tagName || 'OL' === n.tagName);
+    const nested = [...a_li.childNodes].filter(isList);
+    const prev = a_li.previousElementSibling;
+    const parentLi = a_li.parentElement.parentElement;
+    let line = null;
+    if (prev && 'LI' === prev.tagName) {
+      // 見た目で1つ上の行：前の項目の中の、いちばん最後の項目
+      line = prev;
+      for (let sub = line.lastElementChild; sub && isList(sub) && sub.lastElementChild; sub = line.lastElementChild) {
+        line = sub.lastElementChild;
+      }
+    } else if (parentLi && 'LI' === parentLi.tagName) {
+      // 入れ子のリストの先頭の項目：見た目で1つ上の行は、親の項目
+      line = parentLi;
+    } else if ('' !== this.ownText(a_li)) {
+      // 最上位のリストの先頭の項目：項目の記号を外して段落にする（Shift+Tab と同じ）
+      const target = this.outdent(a_li);
+      if (target) this.placeCaretAtStart(target);
+      return;
+    } else {
+      // 最上位のリストの先頭の空の項目：入れ子の項目を、この項目の位置に1段上げて並べる
+      const items = nested.flatMap((list) => [...list.children]);
+      a_li.replaceWith(...items);
+      if (items.length) this.placeCaretAtStart(items[0]);
+      return;
+    }
+    let length = 0;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement.closest('li') === line ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    });
+    for (let n; (n = walker.nextNode());) length += n.data.length;
+    // 項目の文字（入れ子のリスト・チェックボックス以外）を、その行の文字の後ろにつなげる
+    const content = [...a_li.childNodes].filter((n) => !isList(n) && !(1 === n.nodeType && 'INPUT' === n.tagName));
+    const anchor = [...line.childNodes].find(isList) || null;
+    const lastOwn = anchor ? anchor.previousSibling : line.lastChild;
+    if (lastOwn && 'BR' === lastOwn.nodeName && !lastOwn.dataset.soft) lastOwn.remove();
+    for (const n of content) line.insertBefore(n, anchor);
+    const tail = anchor ? anchor.previousSibling : line.lastChild;
+    if (tail && 'BR' === tail.nodeName && !tail.dataset.soft) tail.remove();
+    if (line === parentLi) {
+      // 親の項目につなげた場合：入れ子の項目は、この項目の位置に1段上げて並べる
+      a_li.replaceWith(...nested.flatMap((list) => [...list.children]));
+    } else {
+      // 入れ子の項目を、前の項目の入れ子のリストの後ろへ移す
+      for (const list of nested) {
+        const last = prev.lastElementChild;
+        if (last && last.tagName === list.tagName) last.append(...list.children);
+        else prev.appendChild(list);
+      }
+      a_li.remove();
+    }
+    this.restoreCaretInside(line, length);
   }
 
   /**
@@ -1546,6 +1653,8 @@ export class Editor {
    *  - mdew でコピーした内容：一緒にコピーした Markdown を、書式にして貼る（見出し・表等もそのまま）
    *  - Excel 等の表（表だけの HTML・タブ区切りの文字）：Markdown の表にして貼る（mde と同じ。表のセルの中と、
    *    コードブロックの中では文字のまま）
+   *  - 他のアプリの書式付きの内容（Claude 等のチャット・Web ページ・Word 等の HTML）：見出し・リスト・太字・
+   *    リンク等を Markdown にして貼る（Typora と同じ。clipboard.js の htmlToMarkdown）。書式が無い場合は文字を貼る
    *  - それ以外：pasteContent（文字は Markdown として読む。画像だけならホストに保存を依頼する）
    * @param {{text:string, html:string, markdown:string|null, image:File|null}} a_data クリップボードの内容
    * @param {boolean} a_plain 書式なしで貼り付けるか
@@ -1566,21 +1675,16 @@ export class Editor {
       return;
     }
     const htmlRows = tableFromHtml(a_data.html);
-    const rows = htmlRows || (inCell ? null : tableFromTsv(text));
+    // 書式付きの HTML（見出し・リスト等のタグがある）なら、文字（タブ区切り）より HTML を使う
+    const opts = { bullet: this.m_bullet };
+    const converted = htmlRows ? null : htmlToMarkdown(a_data.html, opts);
+    const useHtml = !!converted && '' !== converted.markdown && (converted.rich || '' === text.trim());
+    const rows = htmlRows || (inCell || useHtml ? null : tableFromTsv(text));
     if (rows && block) {
       const srcs = imageSourcesInRows(rows);
       if (srcs.length) {
         // Excel の範囲の中の画像：ホストに一時フォルダへコピーしてもらってから貼る（貼る位置は今のカーソル位置）
-        const sel = getSelection();
-        const range = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-        this.m_handlers.importImages(srcs).then((a_urls) => {
-          const urls = new Map(srcs.map((src, k) => [src, a_urls[k]]).filter(([, u]) => u));
-          if (range && this.m_root.contains(range.startContainer)) {
-            sel.removeAllRanges();
-            sel.addRange(range);
-          }
-          this.pasteTable(rows, text, urls, inCell);
-        });
+        this.importImagesThen(srcs, (a_urls) => this.pasteTable(rows, text, a_urls, inCell));
         return;
       }
       if (!inCell) {
@@ -1588,7 +1692,40 @@ export class Editor {
         return;
       }
     }
+    if (useHtml && block) {
+      // 表のセルの中は、1つの段落になる場合だけ（リスト等は文字のまま貼る）
+      const blocks = inCell ? parseBlocks(converted.markdown) : null;
+      if (!inCell || (1 === blocks.length && 'paragraph' === blocks[0].type)) {
+        if (converted.images.length) {
+          // Word 等の画像（PC の中の一時ファイル）：ホストに一時フォルダへコピーしてもらってから貼る
+          this.importImagesThen(converted.images, (a_urls) =>
+            this.pasteContent(htmlToMarkdown(a_data.html, { ...opts, urls: a_urls }).markdown, null, false, text));
+        } else {
+          this.pasteContent(converted.markdown, null, false, text);
+        }
+        return;
+      }
+    }
     this.pasteContent(text, a_data.image, a_plain);
+  }
+
+  /**
+   * 他のアプリの画像（PC の中のファイル）を、ホストに一時フォルダへコピーしてもらってから、a_paste を呼ぶ。
+   * 貼る位置は、今のカーソル位置（コピーし終えるまでの間にカーソルが動いても戻す）。
+   * @param {string[]} a_srcs 画像の参照先（file:///…）
+   * @param {(urls: Map<string,string>) => void} a_paste 貼り付ける関数（参照先 → 貼り付けた画像の URL を受け取る）
+   */
+  importImagesThen(a_srcs, a_paste) {
+    const sel = getSelection();
+    const range = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+    this.m_handlers.importImages(a_srcs).then((a_urls) => {
+      const urls = new Map(a_srcs.map((src, k) => [src, a_urls[k]]).filter(([, u]) => u));
+      if (range && this.m_root.contains(range.startContainer)) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      a_paste(urls);
+    });
   }
 
   /**
@@ -1683,8 +1820,10 @@ export class Editor {
    * @param {string} a_text クリップボードの文字（無ければ ''）
    * @param {File|null} a_image クリップボードの画像（無ければ null）
    * @param {boolean} [a_plain] 書式なしで貼り付けるか
+   * @param {string} [a_fallback] 書式にできない場所で、a_text の代わりに文字のまま貼る文字（HTML から変換した
+   *   Markdown を貼る時の、クリップボードの文字。Markdown の記号がそのまま入らないように）
    */
-  pasteContent(a_text, a_image, a_plain) {
+  pasteContent(a_text, a_image, a_plain, a_fallback) {
     if (a_image && '' === a_text.trim()) {
       const sel = getSelection();
       this.m_pasteRange = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
@@ -1706,7 +1845,8 @@ export class Editor {
       if (a_plain) document.execCommand('insertText', false, line);
       else this.insertInlineMarkdown(line);
     } else if (a_plain || !block || !this.pasteMarkdown(text, block)) {
-      text.split('\n').forEach((line, k) => {
+      const lines = a_plain || null == a_fallback ? text : a_fallback.replace(/\r\n?/g, '\n');
+      lines.split('\n').forEach((line, k) => {
         if (k > 0) document.execCommand('insertParagraph');
         if (line) document.execCommand('insertText', false, line);
       });
@@ -1841,6 +1981,26 @@ function htmlToFragment(a_html) {
  */
 function htmlToNodes(a_html) {
   return [...htmlToFragment(a_html).children];
+}
+
+/**
+ * 項目自身の中身が空で、入れ子のリストだけを持つ場合に、項目自身の行を作る（入れ子のリストの前に <br> を置く）。
+ * <br> が無いと、項目の記号と入れ子のリストの記号が同じ行に並び（「・ ◦ 見出し」）、カーソルも置けないため。
+ * @param {HTMLLIElement} a_li リストの項目
+ * @returns {HTMLBRElement|null} 項目自身の行の <br>（中身がある項目・入れ子のリストが無い項目は null）
+ */
+function ensureOwnLine(a_li) {
+  const first = [...a_li.childNodes].find((n) => !(1 === n.nodeType && 'INPUT' === n.tagName)
+    && !(3 === n.nodeType && '' === n.data.replace(/\u200b/g, '').trim()));
+  if (!first || 1 !== first.nodeType) return null;
+  if ('BR' === first.tagName) {
+    const next = first.nextElementSibling;
+    return next && ('UL' === next.tagName || 'OL' === next.tagName) ? first : null;
+  }
+  if ('UL' !== first.tagName && 'OL' !== first.tagName) return null;
+  const br = document.createElement('br');
+  first.before(br);
+  return br;
 }
 
 /**

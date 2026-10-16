@@ -8,6 +8,8 @@
 //  - 右クリックの「表をコピー」：表全体を、罫線付きの HTML とタブ区切りの文字でコピーする（mde と同じ）。
 //  - 貼り付け：Excel 等からコピーした表（HTML の表・タブ区切りの文字）は、Markdown の表として貼り付ける
 //    （mde と同じ。1つ目の行を見出しの行にする）。
+//  - 貼り付け：他のアプリ（Claude 等のチャット・Web ページ・Word 等）の書式付きの内容（HTML）は、Markdown に
+//    直して貼り付ける（Typora と同じ。htmlToMarkdown）。
 //
 // クリップボードへの書き込みは、copy イベントで行う（writeClipboard。document.execCommand('copy') で起こす）。
 import { serializeBlock, serializeInline, escapeText, imageSource } from './markdown.js';
@@ -676,4 +678,708 @@ export function cellMarkdown(a_cell, a_urls) {
     if (url) parts.push(`<img src="${url}"${img.width ? ` width="${img.width}"` : ''}>`);
   }
   return parts.join('\n');
+}
+
+// ===== 貼り付け：他のアプリの書式付きの内容（HTML）を Markdown にする =====
+
+/** 読み飛ばす要素（中身も使わない）。 */
+const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'META', 'LINK', 'TITLE', 'HEAD', 'TEMPLATE', 'NOSCRIPT', 'BUTTON', 'SELECT',
+  'TEXTAREA', 'INPUT', 'SVG', 'CANVAS', 'IFRAME', 'OBJECT', 'EMBED', 'VIDEO', 'AUDIO', 'XML']);
+/** 中身をブロックの並びとして読む入れ物の要素。 */
+const CONTAINER_TAGS = new Set(['BODY', 'HTML', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE',
+  'FIGURE', 'FIGCAPTION', 'DETAILS', 'SUMMARY', 'CENTER', 'FORM', 'FIELDSET', 'DL', 'DT', 'DD', 'ADDRESS', 'CAPTION']);
+/** 段落の中にあった場合に、前後で改行するブロック要素。 */
+const INLINE_BREAK_TAGS = new Set([...CONTAINER_TAGS, 'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'PRE',
+  'BLOCKQUOTE', 'TABLE', 'TR', 'HR']);
+/** 中にあれば、その要素を入れ物として読むブロック要素。 */
+const BLOCK_SELECTOR = 'p,div,ul,ol,li,h1,h2,h3,h4,h5,h6,pre,blockquote,table,hr';
+/** 日本語等の文字（この文字どうしの間の HTML の改行は、空白にせずに詰める。Word の HTML は長い行を改行で折り返すため）。 */
+const RE_CJK_NEWLINE = /([⺀-鿿豈-﫿＀-￯])[ \t]*\n[ \t\n]*(?=[⺀-鿿豈-﫿＀-￯])/g;
+
+/**
+ * 他のアプリ（Claude 等のチャット・Web ページ・Word 等）でコピーした書式付きの内容（HTML）を、Markdown にする
+ * （Typora と同じ）。見出し・リスト（入れ子・番号付き・チェックボックス付き）・太字・斜体・取り消し線・下線・
+ * マーカー・リンク・インラインコード・コードブロック・引用・表・横線・画像を、Markdown の書き方にする。
+ * 文字の色・大きさ等の飾りは捨てる。Word のリスト（mso-list の段落）は、リストにする。
+ * 画像は、Web 上の画像（http・https）はそのまま参照し、PC の中の画像（file:///…。Word 等の一時ファイル）は、
+ * a_opts.urls（ホストが一時フォルダへコピーした先）にあるものだけを入れる。
+ * @param {string} a_html クリップボードの HTML
+ * @param {{bullet?:string, urls?:Map<string,string>}} [a_opts] bullet は箇条書きの記号、urls は画像の参照先 → URL
+ * @returns {{markdown:string, rich:boolean, images:string[]}|null} rich は、文字だけでは表せない書式（見出し・
+ *   リスト・リンク等のタグ）があったか。images は PC の中の画像の参照先。HTML が無ければ null
+ */
+export function htmlToMarkdown(a_html, a_opts = {}) {
+  if (!a_html || !a_html.trim()) return null;
+  const doc = new DOMParser().parseFromString(a_html, 'text/html');
+  const ctx = { rich: false, images: [], urls: a_opts.urls || null };
+  const root = document.createElement('div');
+  convertBlocks(doc.body, root, false, ctx);
+  const opts = { bullet: a_opts.bullet || '-' };
+  const markdown = [...root.children].map((el) => serializeBlock(el, opts)).filter((t) => '' !== t.trim()).join('\n\n');
+  return { markdown, rich: ctx.rich, images: ctx.images };
+}
+
+/** 要素のタグの名前（大文字。SVG 等の小文字の名前もそろえる）。 */
+const tagOf = (a_el) => a_el.tagName.toUpperCase();
+/** 要素の style 属性。 */
+const styleOf = (a_el) => a_el.getAttribute('style') || '';
+
+/**
+ * 表示されない要素か（display:none・Word の mso-hide:all）。
+ * @param {Element} a_el 要素
+ * @returns {boolean}
+ */
+function isHidden(a_el) {
+  return /(?:^|;)\s*display\s*:\s*none|mso-hide\s*:\s*all/i.test(styleOf(a_el)) || a_el.hasAttribute('hidden');
+}
+
+/**
+ * 要素の中で、空白・改行をそのまま表示するか（pre・white-space の指定。指定が無ければ外側と同じ）。
+ * @param {Element} a_el 要素
+ * @param {boolean} a_inherited 外側の要素での値
+ * @returns {boolean}
+ */
+function keepsWhiteSpace(a_el, a_inherited) {
+  if ('PRE' === tagOf(a_el)) return true;
+  const m = styleOf(a_el).match(/white-space\s*:\s*([\w-]+)/i);
+  return m ? /^(?:pre|pre-wrap|pre-line|break-spaces)$/i.test(m[1]) : a_inherited;
+}
+
+/**
+ * 改行の要素（Shift+Enter と同じ、段落の中の改行）。
+ * @param {boolean} [a_boundary] ブロック要素の区切りの代わりに入れたものか（続けて入れた場合は1つにする）
+ * @returns {HTMLBRElement}
+ */
+function softBreak(a_boundary) {
+  const br = document.createElement('br');
+  br.dataset.soft = '1';
+  if (a_boundary) br.dataset.boundary = '1';
+  return br;
+}
+
+/**
+ * 文字を、段落等の中に加える。空白・改行を表示しない場所では、続いた空白・改行を1つの空白にする。
+ * @param {Element} a_out 加える先
+ * @param {string} a_text 文字
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ */
+function appendText(a_out, a_text, a_ws) {
+  const text = a_text.replace(/\r\n?/g, '\n');
+  if (a_ws) {
+    text.split('\n').forEach((part, k) => {
+      if (k > 0) a_out.appendChild(softBreak());
+      if (part) a_out.appendChild(document.createTextNode(part));
+    });
+    return;
+  }
+  const t = text.replace(RE_CJK_NEWLINE, '$1').replace(/[ \t\n\f]+/g, ' ');
+  if (t) a_out.appendChild(document.createTextNode(t));
+}
+
+/**
+ * 段落等の中身として何かあるか（空白・改行だけではないか）。
+ * @param {Element} a_el 要素
+ * @returns {boolean}
+ */
+function hasContent(a_el) {
+  return '' !== a_el.textContent.replace(/[\s​]/g, '') || !!a_el.querySelector('img,input');
+}
+
+/**
+ * 要素の子を、ブロック（段落・見出し・リスト等）の並びにして a_out に加える。ブロックの間にある文字・太字等は、
+ * まとめて段落にする。
+ * @param {Element} a_src 読む要素
+ * @param {Element} a_out 加える先（変換した結果の要素）
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {{rich:boolean, images:string[], urls:Map<string,string>|null}} a_ctx 変換の状態
+ */
+function convertBlocks(a_src, a_out, a_ws, a_ctx) {
+  let para = null;
+  let orphanList = null;
+  const flush = () => {
+    if (para) {
+      finishInline(para);
+      if (hasContent(para)) a_out.appendChild(para);
+      para = null;
+    }
+  };
+  const add = (a_el) => {
+    flush();
+    if (a_el) a_out.appendChild(a_el);
+  };
+  const nodes = [...a_src.childNodes];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (3 === node.nodeType) {
+      // ブロックの間の空白・改行は捨てる
+      if (!para && '' === node.data.trim()) continue;
+      para = para || document.createElement('p');
+      appendText(para, node.data, a_ws);
+      continue;
+    }
+    if (1 !== node.nodeType) continue;
+    const tag = tagOf(node);
+    if (SKIP_TAGS.has(tag) || isHidden(node)) continue;
+    if ('LI' !== tag) orphanList = null;
+    const ws = keepsWhiteSpace(node, a_ws);
+    if (msoListLevel(node)) {
+      // Word のリスト：続いた同じリストの段落をまとめて、入れ子のリストにする
+      const items = [];
+      const id = msoListId(node);
+      let j = i;
+      for (; j < nodes.length; j++) {
+        const n = nodes[j];
+        if (1 === n.nodeType && msoListLevel(n) && msoListId(n) === id) items.push(n);
+        else if (!(8 === n.nodeType || (3 === n.nodeType && '' === n.data.trim()))) break;
+      }
+      i = j - 1;
+      add(wordList(items, a_ws, a_ctx));
+      continue;
+    }
+    if (/^H[1-6]$/.test(tag)) {
+      const h = document.createElement(tag);
+      convertInline(node, h, ws, a_ctx);
+      finishInline(h);
+      if (hasContent(h)) {
+        add(h);
+        a_ctx.rich = true;
+      }
+      continue;
+    }
+    switch (tag) {
+      case 'P':
+        flush();
+        para = document.createElement('p');
+        convertInline(node, para, ws, a_ctx);
+        flush();
+        break;
+      case 'UL':
+      case 'OL':
+        add(convertList(node, ws, a_ctx));
+        break;
+      case 'LI':
+        // リストの外の項目（コピーした範囲がリストの一部だけの場合等）：続いた項目を箇条書きにまとめる
+        if (!orphanList) {
+          orphanList = document.createElement('ul');
+          add(orphanList);
+          a_ctx.rich = true;
+        }
+        orphanList.appendChild(convertItem(node, ws, a_ctx));
+        break;
+      case 'PRE':
+        add(convertPre(node));
+        a_ctx.rich = true;
+        break;
+      case 'BLOCKQUOTE': {
+        const quote = document.createElement('blockquote');
+        convertBlocks(node, quote, ws, a_ctx);
+        if (quote.children.length) {
+          add(quote);
+          a_ctx.rich = true;
+        }
+        break;
+      }
+      case 'TABLE':
+        add(convertTable(node, ws, a_ctx));
+        break;
+      case 'HR':
+        add(document.createElement('hr'));
+        a_ctx.rich = true;
+        break;
+      case 'BR':
+        if (para) para.appendChild(softBreak());
+        break;
+      default:
+        // 中にブロック要素がある、太字等の要素（Google ドキュメントの全体を囲む <b> 等）も、入れ物として読む
+        if (CONTAINER_TAGS.has(tag) || INLINE_BREAK_TAGS.has(tag) || node.querySelector(BLOCK_SELECTOR)) {
+          flush();
+          convertBlocks(node, a_out, ws, a_ctx);
+        } else {
+          // 文字・太字・リンク・画像等：段落にまとめる
+          para = para || document.createElement('p');
+          inlineNode(node, para, a_ws, a_ctx);
+        }
+    }
+  }
+  flush();
+}
+
+/**
+ * 要素の子を、段落等の中身（文字・太字・リンク等）にして a_out に加える。
+ * @param {Element} a_src 読む要素
+ * @param {Element} a_out 加える先
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ */
+function convertInline(a_src, a_out, a_ws, a_ctx) {
+  for (const node of [...a_src.childNodes]) inlineNode(node, a_out, a_ws, a_ctx);
+}
+
+/**
+ * 段落等の中の1つのノードを変換して a_out に加える。
+ * @param {Node} a_node 読むノード
+ * @param {Element} a_out 加える先
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ */
+function inlineNode(a_node, a_out, a_ws, a_ctx) {
+  if (3 === a_node.nodeType) {
+    appendText(a_out, a_node.data, a_ws);
+    return;
+  }
+  if (1 !== a_node.nodeType) return;
+  const tag = tagOf(a_node);
+  if (SKIP_TAGS.has(tag) || isHidden(a_node) || isMsoListMarker(a_node)) return;
+  const ws = keepsWhiteSpace(a_node, a_ws);
+  const style = styleOf(a_node);
+  // 書式の要素（太字等）で囲む。中身の前後の空白は、囲みの外に出す（「**太字 **」は太字にならないため）
+  const wrap = (a_tag, a_rich = true) => {
+    const el = document.createElement(a_tag);
+    convertInline(a_node, el, ws, a_ctx);
+    if (!hasContent(el)) {
+      if (/\s/.test(el.textContent)) a_out.appendChild(document.createTextNode(' '));
+      return;
+    }
+    const [lead, trail] = hoistSpaces(el);
+    if (lead) a_out.appendChild(document.createTextNode(' '));
+    a_out.appendChild(el);
+    if (trail) a_out.appendChild(document.createTextNode(' '));
+    if (a_rich) a_ctx.rich = true;
+  };
+  switch (tag) {
+    case 'BR':
+      a_out.appendChild(softBreak());
+      return;
+    case 'STRONG':
+    case 'B':
+      // Google ドキュメントは全体を <b style="font-weight:normal"> で囲むため、太字の指定を見る
+      if (/font-weight\s*:\s*(?:normal|[1-5]00)\b/i.test(style)) break;
+      wrap('strong');
+      return;
+    case 'EM':
+    case 'I':
+    case 'CITE':
+    case 'VAR':
+    case 'DFN':
+      if (/font-style\s*:\s*normal/i.test(style)) break;
+      wrap('em');
+      return;
+    case 'S':
+    case 'DEL':
+    case 'STRIKE':
+      wrap('del');
+      return;
+    case 'U':
+    case 'INS':
+      wrap('u');
+      return;
+    case 'MARK':
+      wrap('mark');
+      return;
+    case 'CODE':
+    case 'KBD':
+    case 'SAMP':
+    case 'TT': {
+      const text = a_node.textContent.replace(/ /g, ' ').replace(/\s+/g, ' ');
+      if ('' === text.trim()) {
+        if (text) a_out.appendChild(document.createTextNode(' '));
+        return;
+      }
+      const code = document.createElement('code');
+      code.textContent = text;
+      a_out.appendChild(code);
+      a_ctx.rich = true;
+      return;
+    }
+    case 'A': {
+      const href = (a_node.getAttribute('href') || '').trim();
+      if (!/^(?:https?:|mailto:|ftp:)/i.test(href)) break;
+      const title = a_node.getAttribute('title');
+      const a = document.createElement('a');
+      a.setAttribute('href', href);
+      if (title) a.setAttribute('title', title);
+      convertInline(a_node, a, ws, a_ctx);
+      // リンクの中の改行は空白にする
+      for (const br of a.querySelectorAll('br')) br.replaceWith(' ');
+      if (!hasContent(a)) return;
+      const [lead, trail] = hoistSpaces(a);
+      if (lead) a_out.appendChild(document.createTextNode(' '));
+      a_out.appendChild(a);
+      if (trail) a_out.appendChild(document.createTextNode(' '));
+      a_ctx.rich = true;
+      return;
+    }
+    case 'IMG':
+      appendPastedImage(a_node, a_out, a_ctx);
+      return;
+    case 'SUP':
+    case 'SUB':
+    case 'SPAN':
+    case 'FONT':
+    default:
+      break;
+  }
+  if (INLINE_BREAK_TAGS.has(tag)) {
+    // 段落の中のブロック要素（表のセルの中の段落等）：前後で改行する
+    a_out.appendChild(softBreak(true));
+    convertInline(a_node, a_out, ws, a_ctx);
+    a_out.appendChild(softBreak(true));
+    return;
+  }
+  // 文字の飾りの指定（Web ページ・Google ドキュメントの span）による太字・斜体・取り消し線。
+  // 飾りだけでは「書式付き」とはみなさない（VS Code 等のコードの色付けを、文字のまま貼るため）
+  const formats = [];
+  if (/font-weight\s*:\s*(?:bold|bolder|[6-9]00)\b/i.test(style)) formats.push('strong');
+  if (/font-style\s*:\s*italic/i.test(style)) formats.push('em');
+  if (/text-decoration[\w-]*\s*:[^;]*line-through/i.test(style)) formats.push('del');
+  if (!formats.length) {
+    convertInline(a_node, a_out, ws, a_ctx);
+    return;
+  }
+  const outer = document.createElement(formats[0]);
+  let inner = outer;
+  for (const f of formats.slice(1)) inner = inner.appendChild(document.createElement(f));
+  convertInline(a_node, inner, ws, a_ctx);
+  if (!hasContent(outer)) {
+    if (/\s/.test(outer.textContent)) a_out.appendChild(document.createTextNode(' '));
+    return;
+  }
+  const [lead, trail] = hoistSpaces(outer);
+  if (lead) a_out.appendChild(document.createTextNode(' '));
+  a_out.appendChild(outer);
+  if (trail) a_out.appendChild(document.createTextNode(' '));
+}
+
+/**
+ * 書式の要素の中身の先頭・末尾の空白を取り除く（呼び出し側で、要素の外に空白を置く）。
+ * @param {Element} a_el 書式の要素
+ * @returns {[boolean, boolean]} 先頭・末尾に空白があったか
+ */
+function hoistSpaces(a_el) {
+  const texts = textLeaves(a_el);
+  let lead = false;
+  let trail = false;
+  if (texts.length) {
+    const first = texts[0];
+    if (/^\s/.test(first.data) && isFirstLeaf(a_el, first)) {
+      first.data = first.data.replace(/^\s+/, '');
+      lead = true;
+    }
+    const last = texts[texts.length - 1];
+    if (/\s$/.test(last.data) && isLastLeaf(a_el, last)) {
+      last.data = last.data.replace(/\s+$/, '');
+      trail = true;
+    }
+  }
+  return [lead, trail];
+}
+
+/** 要素の中の文字のノード（インラインコードの中は除く）。 */
+function textLeaves(a_el) {
+  const out = [];
+  const walk = (a_node) => {
+    for (const c of a_node.childNodes) {
+      if (3 === c.nodeType) out.push(c);
+      else if (1 === c.nodeType && 'CODE' !== c.tagName) walk(c);
+    }
+  };
+  walk(a_el);
+  return out;
+}
+
+/** 要素の中で、a_leaf より前に中身（画像・改行・インラインコード・文字）が無いか。 */
+function isFirstLeaf(a_el, a_leaf) {
+  for (let n = a_leaf; n && n !== a_el; n = n.parentNode) if (n.previousSibling) return false;
+  return true;
+}
+
+/** 要素の中で、a_leaf より後ろに中身が無いか。 */
+function isLastLeaf(a_el, a_leaf) {
+  for (let n = a_leaf; n && n !== a_el; n = n.parentNode) if (n.nextSibling) return false;
+  return true;
+}
+
+/**
+ * 段落等の中身を整える：先頭・末尾の空白と改行を取り除き、ノードの境目で続いた空白を1つにする。
+ * ブロック要素の区切りの代わりに入れた改行（softBreak(true)）は、続いたものを1つにする。
+ * 中のブロック（リストの項目の中の入れ子のリスト等）は、そのブロックの前後で区切って扱う。
+ * @param {Element} a_el 段落・見出し・項目・セル等
+ */
+function finishInline(a_el) {
+  // 中身を、ブロックで区切った「文字・改行・画像等」の並びにする
+  const segments = [[]];
+  const walk = (a_node) => {
+    for (const c of [...a_node.childNodes]) {
+      if (3 === c.nodeType) {
+        segments[segments.length - 1].push(c);
+      } else if (1 === c.nodeType) {
+        const tag = c.tagName;
+        if (/^(?:UL|OL|P|PRE|BLOCKQUOTE|TABLE|HR|DIV|H[1-6])$/.test(tag)) segments.push([]);
+        else if ('BR' === tag || 'IMG' === tag || 'INPUT' === tag || 'CODE' === tag) segments[segments.length - 1].push(c);
+        else walk(c);
+      }
+    }
+  };
+  walk(a_el);
+  for (const seg of segments) {
+    // 続いた区切りの改行・前後の改行を除く
+    const items = seg.filter((n, k) => {
+      if (!(1 === n.nodeType && 'BR' === n.tagName && n.dataset.boundary)) return true;
+      const prev = seg.slice(0, k).reverse().find((p) => !(3 === p.nodeType && '' === p.data.trim()));
+      if (!prev || (1 === prev.nodeType && 'BR' === prev.tagName)) {
+        n.remove();
+        return false;
+      }
+      return true;
+    });
+    // 先頭
+    while (items.length) {
+      const n = items[0];
+      if (3 === n.nodeType) {
+        n.data = n.data.replace(/^[ \t]+/, '');
+        if (n.data) break;
+      } else if ('BR' !== n.tagName) {
+        break;
+      }
+      n.remove();
+      items.shift();
+    }
+    // 末尾
+    while (items.length) {
+      const n = items[items.length - 1];
+      if (3 === n.nodeType) {
+        n.data = n.data.replace(/[ \t]+$/, '');
+        if (n.data) break;
+      } else if ('BR' !== n.tagName) {
+        break;
+      }
+      n.remove();
+      items.pop();
+    }
+    // ノードの境目で続いた空白
+    let prev = null;
+    for (const n of items) {
+      if (3 === n.nodeType) {
+        if (prev && 3 === prev.nodeType && / $/.test(prev.data) && /^ /.test(n.data)) n.data = n.data.slice(1);
+        if ((!prev || 'BR' === prev.nodeName) && /^ /.test(n.data) && !n.data.trim()) n.data = '';
+      }
+      prev = n;
+    }
+  }
+  for (const br of a_el.querySelectorAll('br[data-boundary]')) delete br.dataset.boundary;
+  // 中身の無くなった書式の要素を取り除く
+  for (const el of [...a_el.querySelectorAll('strong,em,del,u,mark,a')].reverse()) if (!hasContent(el)) el.remove();
+}
+
+/**
+ * 画像を加える。Web 上の画像はそのまま、PC の中の画像は、ホストが一時フォルダへコピーした先を参照する。
+ * @param {Element} a_img 読む img 要素
+ * @param {Element} a_out 加える先
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ */
+function appendPastedImage(a_img, a_out, a_ctx) {
+  const src = (a_img.getAttribute('src') || '').trim();
+  const img = document.createElement('img');
+  if (/^file:/i.test(src)) {
+    if (!a_ctx.images.includes(src)) a_ctx.images.push(src);
+    const url = a_ctx.urls && a_ctx.urls.get(src);
+    if (!url) return;
+    // Word 等での大きさを保つ（Excel の表の画像と同じ。clipboard.js の cellMarkdown）
+    const width = parseInt(a_img.getAttribute('width') || '0', 10) || 0;
+    img.setAttribute('src', url);
+    if (width) img.dataset.html = `<img src="${esc(url)}" width="${width}">`;
+  } else if (/^https?:/i.test(src)) {
+    img.setAttribute('src', src);
+  } else {
+    return;
+  }
+  const alt = a_img.getAttribute('alt');
+  if (alt) img.setAttribute('alt', alt.replace(/\s+/g, ' ').trim());
+  a_out.appendChild(img);
+  a_ctx.rich = true;
+}
+
+/**
+ * リスト（ul・ol）を変換する。
+ * @param {Element} a_src 読む ul・ol 要素
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ * @returns {HTMLElement|null} 項目が無ければ null
+ */
+function convertList(a_src, a_ws, a_ctx) {
+  const tag = tagOf(a_src);
+  const list = document.createElement(tag);
+  if ('OL' === tag) {
+    const start = parseInt(a_src.getAttribute('start') || '1', 10);
+    if (!isNaN(start) && 1 !== start && start >= 0) list.setAttribute('start', String(start));
+  }
+  for (const child of a_src.children) {
+    const t = tagOf(child);
+    if (SKIP_TAGS.has(t) || isHidden(child)) continue;
+    const ws = keepsWhiteSpace(child, a_ws);
+    if ('UL' === t || 'OL' === t) {
+      // 項目の外に書かれた入れ子のリスト：前の項目の中に入れる
+      const nested = convertList(child, ws, a_ctx);
+      if (!nested) continue;
+      const prev = list.lastElementChild || list.appendChild(document.createElement('li'));
+      prev.appendChild(nested);
+    } else {
+      const item = convertItem(child, ws, a_ctx);
+      if (hasContent(item) || item.querySelector('ul,ol')) list.appendChild(item);
+    }
+  }
+  if (!list.children.length) return null;
+  a_ctx.rich = true;
+  return list;
+}
+
+/**
+ * リストの項目（li）を変換する。最初の段落は、項目の文字にする。チェックボックスはタスクリストの項目にする。
+ * @param {Element} a_src 読む li 要素
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ * @returns {HTMLLIElement}
+ */
+function convertItem(a_src, a_ws, a_ctx) {
+  const item = document.createElement('li');
+  const box = a_src.querySelector('input[type=checkbox]');
+  if (box && box.closest('li') === a_src) {
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = box.hasAttribute('checked') || box.checked;
+    item.appendChild(input);
+  }
+  convertBlocks(a_src, item, a_ws, a_ctx);
+  const first = [...item.children].find((c) => 'INPUT' !== c.tagName);
+  if (first && 'P' === first.tagName) first.replaceWith(...first.childNodes);
+  return item;
+}
+
+/**
+ * コードブロック（pre）を変換する。言語は、class の「language-…」「lang-…」から読む。
+ * @param {Element} a_src 読む pre 要素
+ * @returns {HTMLPreElement}
+ */
+function convertPre(a_src) {
+  const pre = document.createElement('pre');
+  const code = a_src.querySelector('code');
+  const m = `${a_src.className || ''} ${(code && code.className) || ''}`.match(/(?:^|\s)(?:language|lang)-([\w+#.-]+)/);
+  if (m) pre.dataset.info = m[1];
+  let text = '';
+  // 1行ずつ div 等に分けて書く Web ページもあるため、ブロック要素の後ろで改行する
+  const walk = (a_node) => {
+    for (const c of a_node.childNodes) {
+      if (3 === c.nodeType) {
+        text += c.data;
+      } else if (1 === c.nodeType) {
+        const tag = tagOf(c);
+        if (SKIP_TAGS.has(tag) || isHidden(c)) continue;
+        if ('BR' === tag) {
+          text += '\n';
+          continue;
+        }
+        walk(c);
+        if (/^(?:DIV|P|LI|TR)$/.test(tag) && !text.endsWith('\n')) text += '\n';
+      }
+    }
+  };
+  walk(a_src);
+  pre.textContent = text.replace(/\r\n?/g, '\n').replace(/ /g, ' ').replace(/\n+$/, '');
+  return pre;
+}
+
+/**
+ * 表（table）を変換する。1つ目の行を見出しの行にする。セルの中の改行・段落は <br> にする。
+ * 横に結合したセルは、空のセルで埋める。
+ * @param {HTMLTableElement} a_src 読む table 要素
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ * @returns {HTMLTableElement|null} 行が無ければ null
+ */
+function convertTable(a_src, a_ws, a_ctx) {
+  const table = document.createElement('table');
+  for (const tr of a_src.rows) {
+    const row = document.createElement('tr');
+    for (const cell of tr.cells) {
+      const c = document.createElement(table.rows.length ? 'td' : 'th');
+      convertInline(cell, c, keepsWhiteSpace(cell, a_ws), a_ctx);
+      finishInline(c);
+      for (const br of c.querySelectorAll('br')) delete br.dataset.soft;
+      const align = (cell.getAttribute('align') || (styleOf(cell).match(/text-align\s*:\s*(left|center|right)/i) || [])[1] || '').toLowerCase();
+      if (/^(?:left|center|right)$/.test(align)) c.dataset.align = align;
+      row.appendChild(c);
+      for (let k = 1; k < (parseInt(cell.getAttribute('colspan') || '1', 10) || 1); k++) row.appendChild(document.createElement('td'));
+    }
+    if (row.children.length) table.appendChild(row);
+  }
+  if (!table.rows.length) return null;
+  a_ctx.rich = true;
+  return table;
+}
+
+/**
+ * Word のリストの段落の深さ（style の「mso-list:l0 level1 lfo1」）。リストの段落でなければ 0。
+ * @param {Node} a_node ノード
+ * @returns {number}
+ */
+function msoListLevel(a_node) {
+  if (1 !== a_node.nodeType) return 0;
+  const m = styleOf(a_node).match(/mso-list\s*:\s*l\d+\s+level(\d+)/i);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/**
+ * Word のリストの段落が属するリスト（style の「mso-list:l0 level1 lfo1」の「l0」）。
+ * @param {Element} a_el 要素
+ * @returns {string}
+ */
+function msoListId(a_el) {
+  return (styleOf(a_el).match(/mso-list\s*:\s*(l\d+)/i) || [])[1] || '';
+}
+
+/**
+ * Word のリストの記号（「・」「1.」等。style に「mso-list:Ignore」が付いた要素）か。
+ * @param {Element} a_el 要素
+ * @returns {boolean}
+ */
+function isMsoListMarker(a_el) {
+  return /mso-list\s*:\s*ignore/i.test(styleOf(a_el));
+}
+
+/**
+ * Word のリストの段落の並びを、入れ子のリストにする。記号が番号（「1.」「a)」「①」等）なら番号付きリストにする。
+ * @param {Element[]} a_items リストの段落
+ * @param {boolean} a_ws 空白・改行をそのまま表示する場所か
+ * @param {object} a_ctx 変換の状態（convertBlocks と同じ）
+ * @returns {HTMLElement|null}
+ */
+function wordList(a_items, a_ws, a_ctx) {
+  const stack = [];
+  let root = null;
+  for (const p of a_items) {
+    const level = msoListLevel(p);
+    const marker = [...p.querySelectorAll('*')].filter(isMsoListMarker).map((e) => e.textContent).join('').replace(/ /g, ' ').trim();
+    const num = marker.match(/^[(（]?([0-9]+|[A-Za-z]{1,3}|[Ⅰ-ⅿ]+|[一二三四五六七八九十]+)[.)．）、]|^[①-⓿]/);
+    while (stack.length && stack[stack.length - 1].level > level) stack.pop();
+    let top = stack[stack.length - 1];
+    if (!top && root) {
+      top = { level, list: root };
+      stack.push(top);
+    }
+    if (!top || top.level < level) {
+      const list = document.createElement(num ? 'ol' : 'ul');
+      const start = num && /^\d+$/.test(num[1] || '') ? parseInt(num[1], 10) : 1;
+      if (1 !== start) list.setAttribute('start', String(start));
+      if (top) (top.list.lastElementChild || top.list.appendChild(document.createElement('li'))).appendChild(list);
+      else root = list;
+      top = { level, list };
+      stack.push(top);
+    }
+    const li = document.createElement('li');
+    convertInline(p, li, keepsWhiteSpace(p, a_ws), a_ctx);
+    finishInline(li);
+    top.list.appendChild(li);
+  }
+  if (root) a_ctx.rich = true;
+  return root;
 }
