@@ -99,6 +99,23 @@ export class Editor {
     });
     // リンクを開くのは、マウスを押した位置から動かさずに離した時だけ（ドラッグでの選択と区別する。onClick 参照）
     a_root.addEventListener('mousedown', (e) => { this.m_mouseDown = { x: e.clientX, y: e.clientY }; });
+    // ドラッグでの範囲選択：マウスがブロックの間の余白（段落・リスト等の margin）にある時の選択の位置を直す（adjustDragFocus）
+    a_root.addEventListener('mousedown', (e) => {
+      this.m_dragSelecting = 0 === e.button && !(e.target.closest && e.target.closest('input,img'));
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!this.m_dragSelecting) return;
+      if (!(e.buttons & 1)) {
+        this.m_dragSelecting = false;
+        return;
+      }
+      // ブラウザが選択を広げた後（同じ描画の前）に直す
+      const x = e.clientX;
+      const y = e.clientY;
+      cancelAnimationFrame(this.m_dragFrame);
+      this.m_dragFrame = requestAnimationFrame(() => this.adjustDragFocus(x, y));
+    });
+    document.addEventListener('mouseup', () => { this.m_dragSelecting = false; });
     a_root.addEventListener('click', (e) => this.onClick(e));
     a_root.addEventListener('contextmenu', (e) => this.onContextMenu(e));
     // リンクの上にマウスを乗せた時に、ステータスバーへリンク先を出す（文書の要素には手を加えない）
@@ -106,6 +123,51 @@ export class Editor {
       const link = e.target.closest && e.target.closest('a[href]');
       this.m_handlers.onHoverLink(link && this.m_root.contains(link) ? link.getAttribute('href') : null);
     });
+  }
+
+  /**
+   * ドラッグでの範囲選択で、マウスがブロックの間の余白（段落・見出し・リスト等の上下の margin）や、編集領域の余白に
+   * ある時に、選択の端を、上下でいちばん近い行の、マウスの横位置にする。
+   * ブラウザは、ブロックの間の余白の位置を「次のブロックの先頭」とみなすため、行の末尾より右へドラッグしている時に
+   * マウスが少し上にずれて余白に入ると、選択の端が行の先頭に飛び、選択が消えたように見える（行の先頭から
+   * ドラッグした場合）。
+   * @param {number} a_x マウスの位置（clientX）
+   * @param {number} a_y マウスの位置（clientY）
+   */
+  adjustDragFocus(a_x, a_y) {
+    const hit = document.elementFromPoint(a_x, a_y);
+    if (!hit || !(hit === this.m_root || (this.m_root.contains(hit) && /^(?:UL|OL|BLOCKQUOTE)$/.test(hit.tagName)))) return;
+    const sel = getSelection();
+    if (!sel.rangeCount || !this.m_root.contains(sel.anchorNode)) return;
+    // 上下でいちばん近い、文字を書く単位の要素（同じ近さなら、後ろの要素＝入れ子の内側）
+    let best = null;
+    let bestDist = Infinity;
+    for (const el of this.m_root.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,pre,table,div.md-raw')) {
+      const r = el.getBoundingClientRect();
+      if (r.height <= 0) continue;
+      const dist = a_y < r.top ? r.top - a_y : (a_y > r.bottom ? a_y - r.bottom : 0);
+      if (dist <= bestDist) {
+        best = el;
+        bestDist = dist;
+      }
+    }
+    if (!best) return;
+    // マウスの位置を、その要素の中に収めて、文字の位置を求める
+    const r = best.getBoundingClientRect();
+    const x = Math.min(Math.max(a_x, r.left + 1), r.right - 1);
+    const y = Math.min(Math.max(a_y, r.top + 1), r.bottom - 1);
+    let node = null;
+    let offset = 0;
+    if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(x, y);
+      if (pos) ({ offsetNode: node, offset } = pos);
+    } else if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(x, y);
+      if (range) ({ startContainer: node, startOffset: offset } = range);
+    }
+    if (!node || !this.m_root.contains(node) || node === this.m_root) return;
+    if (sel.focusNode === node && sel.focusOffset === offset) return;
+    sel.extend(node, offset);
   }
 
   // ===== 読み込み・保存 =====
