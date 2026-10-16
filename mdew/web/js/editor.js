@@ -1929,6 +1929,10 @@ function detectBulletMarker(a_markdown) {
   return best[1] > 0 ? best[0] : '-';
 }
 
+/** サブメニューを持つ項目にマウスを乗せてから開くまで・ほかの項目へ移ってから閉じるまでの時間（ミリ秒。Windows の
+ * メニューの既定値と同じ）。 */
+const SUBMENU_HOVER_DELAY_MS = 400;
+
 /**
  * 右クリックのメニューを表示する（main.js の「ファイル」のメニューでも使う）。項目を選ぶか、メニューの外をクリックする・Esc キーで閉じる。
  * @param {number} a_x 表示する位置（画面の左上からの座標。画面からはみ出す場合は内側にずらす）
@@ -1937,14 +1941,22 @@ function detectBulletMarker(a_markdown) {
  *   submenu?:object[]}|null)[]} a_items
  *   項目。null は区切り線。key はショートカットの表示、checked は項目の左にチェックの印を付ける（その書式になっている）、
  *   heading は選べない見出し（下の項目のまとまりの名前）、title はマウスを乗せた時に出す説明、
- *   submenu はサブメニューの項目（項目をクリックすると右側に開く。項目の形は a_items と同じ）
+ *   submenu はサブメニューの項目（項目をクリックするか、マウスを乗せてしばらくすると右側に開く。項目の形は a_items と同じ）
  * @param {(item:object)=>void} a_onSelect 項目が選ばれた時に呼ぶ関数（選ばれた項目を渡す。サブメニューの項目も同じ）
  */
 export function showMenu(a_x, a_y, a_items, a_onSelect) {
   document.querySelectorAll('.md-menu').forEach((m) => m.remove());
   /** 開いているサブメニュー（無ければ null）。 */
   let sub = null;
+  /** マウスを乗せてしばらくしたらサブメニューを開く・閉じるためのタイマー（SUBMENU_HOVER_DELAY_MS 参照）。 */
+  let openTimer = 0;
+  let closeTimer = 0;
+  const clearTimers = () => {
+    clearTimeout(openTimer);
+    clearTimeout(closeTimer);
+  };
   const closeSub = () => {
+    clearTimers();
     if (sub) sub.remove();
     sub = null;
     document.querySelectorAll('.md-menu button.submenu-open').forEach((b) => b.classList.remove('submenu-open'));
@@ -1986,15 +1998,30 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
       // mousedown で既定の動作を止めて、編集中のカーソル位置（選択範囲）を保つ
       button.addEventListener('mousedown', (e) => e.preventDefault());
       if (item.submenu) {
-        // サブメニュー：クリックした時だけ右側に開く（もう一度クリックすると閉じる）。マウスを乗せただけでは
-        // 開かない（最近使ったファイル等の長いサブメニューが、下の項目へマウスを動かす途中で開いて、
-        // ほかの項目を隠してしまわないように）
+        // サブメニュー：クリックすると右側に開く（もう一度クリックすると閉じる）。マウスを乗せた時は、しばらく
+        // （SUBMENU_HOVER_DELAY_MS）乗せたままにした時だけ開く（Windows のメニューと同じ。最近使ったファイル等の
+        // 長いサブメニューが、下の項目へマウスを動かす途中で開いて、ほかの項目を隠してしまわないように）
         button.classList.add('has-submenu');
+        const isOpen = () => sub && sub.dataset.owner === item.label;
         button.addEventListener('click', () => {
-          if (sub && sub.dataset.owner === item.label) closeSub();
+          clearTimers();
+          if (isOpen()) closeSub();
           else openSub(button, item);
         });
+        button.addEventListener('mouseenter', () => {
+          clearTimers();
+          if (!isOpen()) openTimer = setTimeout(() => openSub(button, item), SUBMENU_HOVER_DELAY_MS);
+        });
+        button.addEventListener('mouseleave', () => clearTimeout(openTimer));
       } else {
+        // 親のメニューのほかの項目にマウスを乗せたら、しばらくしてサブメニューを閉じる（その間にサブメニューへ
+        // マウスを移せば閉じない）
+        if (!a_isSub) {
+          button.addEventListener('mouseenter', () => {
+            clearTimers();
+            if (sub) closeTimer = setTimeout(closeSub, SUBMENU_HOVER_DELAY_MS);
+          });
+        }
         button.addEventListener('click', () => {
           close();
           a_onSelect(item);
@@ -2014,6 +2041,8 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     closeSub();
     sub = build(a_item.submenu, true);
     sub.dataset.owner = a_item.label;
+    // サブメニューへマウスを移したら、閉じる予定を取り消す
+    sub.addEventListener('mouseenter', () => clearTimeout(closeTimer));
     a_button.classList.add('submenu-open'); // サブメニューを開いている間は、項目を選んだ色のままにする
     document.body.appendChild(sub);
     const r = a_button.getBoundingClientRect();
@@ -2039,6 +2068,7 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     else close();
   };
   function close() {
+    clearTimers();
     menu.remove();
     closeSub();
     document.removeEventListener('mousedown', onOutside, true);

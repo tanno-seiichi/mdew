@@ -25,16 +25,17 @@ html, body { height: 100%; margin: 0; }
 body { font-family: var(--ui-font); background: #ffffff; color: var(--text); }
 #app { display: flex; flex-direction: column; height: 100vh; }
 
+/* メニューバー：Typora（Windows 標準のメニュー）と同じく、背景は白・枠線なし・文字は 12px（9pt）・項目の間の余白は狭く */
 #menubar {
-  display: flex; align-items: center; gap: 4px;
-  padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--pane-bg);
-  font-size: 13px;
+  display: flex; align-items: center; gap: 0;
+  padding: 0 2px; background: #ffffff;
+  font-size: 12px; line-height: 18px;
 }
 #menubar button {
-  font: inherit; padding: 3px 10px; border: 1px solid transparent; border-radius: 4px;
+  font: inherit; padding: 1px 6px; border: none; border-radius: 2px;
   background: transparent; cursor: pointer;
 }
-#menubar button:hover { background: #e6e8eb; border-color: var(--line); }
+#menubar button:hover { background: #e6e8eb; }
 
 #body { flex: 1; display: flex; min-height: 0; }
 #outline {
