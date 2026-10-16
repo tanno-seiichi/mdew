@@ -2159,10 +2159,11 @@ const SUBMENU_HOVER_DELAY_MS = 400;
  * 右クリックのメニューを表示する（main.js の「ファイル」のメニューでも使う）。項目を選ぶか、メニューの外をクリックする・Esc キーで閉じる。
  * @param {number} a_x 表示する位置（画面の左上からの座標。画面からはみ出す場合は内側にずらす）
  * @param {number} a_y
- * @param {({label:string, key?:string, checked?:boolean, disabled?:boolean, heading?:boolean, title?:string,
+ * @param {({label:string, key?:string, checked?:boolean, disabled?:boolean, heading?:boolean, title?:string, path?:boolean,
  *   submenu?:object[]}|null)[]} a_items
  *   項目。null は区切り線。key はショートカットの表示、checked は項目の左にチェックの印を付ける（その書式になっている）、
  *   heading は選べない見出し（下の項目のまとまりの名前）、title はマウスを乗せた時に出す説明、
+ *   path は label がファイル・フォルダのパスか（幅が足りない時に、名前を残してフォルダの部分を「…」にする）、
  *   submenu はサブメニューの項目（項目をクリックするか、マウスを乗せてしばらくすると右側に開く。項目の形は a_items と同じ）
  * @param {(item:object)=>void} a_onSelect 項目が選ばれた時に呼ぶ関数（選ばれた項目を渡す。サブメニューの項目も同じ）
  */
@@ -2211,7 +2212,19 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
       check.textContent = item.checked ? '✓' : '';
       const label = button.appendChild(document.createElement('span'));
       label.className = 'label';
-      label.textContent = item.label;
+      const sep = item.path ? Math.max(item.label.lastIndexOf('\\'), item.label.lastIndexOf('/')) : -1;
+      if (sep > 0) {
+        // ファイル・フォルダのパス：メニューの幅が足りない時は、フォルダの部分を「…」にして、名前（最後の部分）は残す
+        label.classList.add('path');
+        const dir = label.appendChild(document.createElement('span'));
+        dir.className = 'dir';
+        dir.textContent = item.label.slice(0, sep + 1);
+        const name = label.appendChild(document.createElement('span'));
+        name.className = 'name';
+        name.textContent = item.label.slice(sep + 1);
+      } else {
+        label.textContent = item.label;
+      }
       if (item.title) button.title = item.title;
       const key = button.appendChild(document.createElement('span'));
       key.className = 'key';
@@ -2255,7 +2268,8 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
   };
 
   /**
-   * サブメニューを、項目の右側に開く（画面の右にはみ出す場合は左側に開く）。
+   * サブメニューを、親のメニューの右側に開く。右に収まらない場合は左側に開く。どちらにも収まらない場合は、
+   * 広い方に、収まる幅に縮めて開く（長い項目は「…」にする）。どの場合も、親のメニューには重ねない。
    * @param {HTMLElement} a_button サブメニューを持つ項目
    * @param {object} a_item その項目
    */
@@ -2268,10 +2282,21 @@ export function showMenu(a_x, a_y, a_items, a_onSelect) {
     a_button.classList.add('submenu-open'); // サブメニューを開いている間は、項目を選んだ色のままにする
     document.body.appendChild(sub);
     const r = a_button.getBoundingClientRect();
-    const size = sub.getBoundingClientRect();
-    const left = r.right + size.width + 4 <= window.innerWidth ? r.right - 2 : Math.max(4, r.left - size.width + 2);
-    sub.style.left = `${left}px`;
-    sub.style.top = `${Math.max(4, Math.min(r.top - 5, window.innerHeight - size.height - 4))}px`;
+    const parent = a_button.closest('.md-menu').getBoundingClientRect();
+    // 親のメニューの右側・左側に使える幅（画面の端から 4px は空ける。親のメニューとは 2px だけ重ねて、つながって見せる）
+    const rightSpace = window.innerWidth - 4 - (parent.right - 2);
+    const leftSpace = parent.left + 2 - 4;
+    let width = sub.getBoundingClientRect().width;
+    const toRight = width <= rightSpace || (width > leftSpace && rightSpace >= leftSpace);
+    const space = toRight ? rightSpace : leftSpace;
+    if (width > space) {
+      // どちらにも収まらない：広い方の幅に縮める（枠線の分を除いた幅を指定する）
+      sub.style.maxWidth = `${Math.max(0, space - 2)}px`;
+      width = sub.getBoundingClientRect().width;
+    }
+    const height = sub.getBoundingClientRect().height;
+    sub.style.left = `${toRight ? parent.right - 2 : parent.left + 2 - width}px`;
+    sub.style.top = `${Math.max(4, Math.min(r.top - 5, window.innerHeight - height - 4))}px`;
   };
 
   const menu = build(a_items, false);

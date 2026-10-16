@@ -209,6 +209,10 @@ body.find-selected #doc ::selection, body.find-selected #source::selection { bac
 .md-menu { max-width: calc(100vw - 8px); }
 /* 長い項目（最近使ったファイルのフルパス等）は、画面に収まらない分を「…」にする（マウスを乗せると全体を表示する） */
 .md-menu button .label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* ファイル・フォルダのパスは、フォルダの部分を「…」にして、名前（最後の部分）は残す */
+.md-menu button .label.path { display: flex; }
+.md-menu button .label.path .dir { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.md-menu button .label.path .name { flex: none; }
 .md-menu button .check { width: 18px; flex: none; text-align: center; color: #0b62c4; }
 .md-menu button .key { margin-left: auto; padding-left: 28px; color: #888; font-size: 12px; }
 .md-menu button:disabled .key { color: #bbb; }

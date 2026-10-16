@@ -1344,7 +1344,7 @@ const MENUS = {
       {
         label: '最近使ったファイル',
         submenu: state.recentFiles.length
-          ? [...state.recentFiles.map((p) => ({ label: p, title: p, run: () => openRecent(p) })), null,
+          ? [...state.recentFiles.map((p) => ({ label: p, title: p, path: true, run: () => openRecent(p) })), null,
             { label: '履歴をクリア', cmd: 'clearRecent' }]
           : [{ label: '（履歴なし）', disabled: true }],
       },
@@ -1352,7 +1352,7 @@ const MENUS = {
       {
         label: '最近使ったフォルダ',
         submenu: state.recentFolders.length
-          ? [...state.recentFolders.map((p) => ({ label: p, title: p, run: () => openRecentFolder(p) })), null,
+          ? [...state.recentFolders.map((p) => ({ label: p, title: p, path: true, run: () => openRecentFolder(p) })), null,
             { label: '履歴をクリア', cmd: 'clearRecentFolders' }]
           : [{ label: '（履歴なし）', disabled: true }],
       },
