@@ -67,10 +67,10 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
 :is(#doc, #print-doc) p { margin: 0 0 0.8em; }
 /* 見出しの大きさは本文の文字の大きさ（--doc-font-size）に対する比率 */
 :is(#doc, #print-doc) h1, :is(#doc, #print-doc) h2, :is(#doc, #print-doc) h3, :is(#doc, #print-doc) h4, :is(#doc, #print-doc) h5, :is(#doc, #print-doc) h6 { line-height: 1.4; margin: 1.2em 0 0.6em; font-weight: 700; }
-:is(#doc, #print-doc) h1 { font-size: 1.875em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
-:is(#doc, #print-doc) h2 { font-size: 1.5em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
-:is(#doc, #print-doc) h3 { font-size: 1.25em; }
-:is(#doc, #print-doc) h4 { font-size: 1.0625em; }
+:is(#doc, #print-doc) h1 { font-size: 2.25em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
+:is(#doc, #print-doc) h2 { font-size: 1.75em; border-bottom: 1px solid #b4b4b4; padding-bottom: 4px; }
+:is(#doc, #print-doc) h3 { font-size: 1.5em; }
+:is(#doc, #print-doc) h4 { font-size: 1.25em; }
 :is(#doc, #print-doc) h5, :is(#doc, #print-doc) h6 { font-size: 1em; }
 :is(#doc, #print-doc) ul, :is(#doc, #print-doc) ol { margin: 0 0 0.8em; padding-left: 1.8em; }
 :is(#doc, #print-doc) li > ul, :is(#doc, #print-doc) li > ol { margin-bottom: 0; }
