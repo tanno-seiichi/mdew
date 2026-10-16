@@ -112,7 +112,8 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
 :is(#doc, #print-doc) mark { background: #fff3a3; }
 
 #statusbar {
-  display: flex; gap: 16px; padding: 3px 10px; border-top: 1px solid var(--line);
+  /* 文字は高さ方向の中央に（Yu Gothic UI は文字が少し下に寄って見えるため、上の余白を 1px 減らして下に回す）。左の余白は狭く */
+  display: flex; align-items: center; gap: 16px; padding: 2px 10px 4px 4px; border-top: 1px solid var(--line);
   background: var(--pane-bg); font-size: 12px; color: #555;
   line-height: 18px; min-height: 18px; /* 表示する文字が無い時も高さを変えない */
 }
