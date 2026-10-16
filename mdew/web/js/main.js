@@ -1173,6 +1173,9 @@ const commands = {
   softBreakSource: () => setSoftBreakMode(false),
   softBreakJoin: () => setSoftBreakMode(true),
   toggleSource: () => setSourceMode(!state.sourceMode),
+  zoomIn: () => setZoom(zoomLevel + ZOOM_STEP),
+  zoomOut: () => setZoom(zoomLevel - ZOOM_STEP),
+  zoomReset: () => setZoom(1),
   about: () => send({ cmd: 'about' }), // バージョン情報のウィンドウ（ホスト側の dialog\AboutWindow）
   // Readme を開く（実行フォルダの README.md を新しいウィンドウで開く。ホスト側の OpenReadme）
   readme: () => send({ cmd: 'openReadme' }),
@@ -1274,6 +1277,55 @@ try {
 }
 setJoinSoftBreaks(joinSoftBreaks);
 
+// ---- 表示倍率（mde のステータスバーの「－」「100%」「＋」と同じ。次回起動時も同じにする）----------
+/** localStorage に保存するキー（値は倍率。1 が 100%）。 */
+const ZOOM_KEY = 'zoom';
+/** 1回の拡大・縮小で変える倍率（mde と同じ 10%）。 */
+const ZOOM_STEP = 0.1;
+/** 倍率の範囲（mde と同じ 50%〜250%）。 */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.5;
+/** 今の表示倍率（1 が 100%）。 */
+let zoomLevel = 1;
+
+/**
+ * 文書の表示倍率を変える（文書の部分だけ。メニュー・アウトライン等は変えない）。Markdown の表示は文書全体
+ * （文字・画像・余白）を拡大・縮小し（app.css の #doc の zoom）、ソースモードは文字の大きさを変える。
+ * 文書の中の今見ている位置は保つ。
+ * @param {number} a_level 倍率（1 が 100%。50%〜250% に収め、1% 単位に丸める）
+ */
+function setZoom(a_level) {
+  const level = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(a_level * 100) / 100));
+  const wrap = $('editor-wrap');
+  const ratio = wrap.scrollHeight > wrap.clientHeight ? wrap.scrollTop / (wrap.scrollHeight - wrap.clientHeight) : 0;
+  zoomLevel = level;
+  document.documentElement.style.setProperty('--zoom', String(level));
+  if (wrap.scrollHeight > wrap.clientHeight) wrap.scrollTop = ratio * (wrap.scrollHeight - wrap.clientHeight);
+  try {
+    localStorage.setItem(ZOOM_KEY, String(level));
+  } catch {
+    // 保存できなくても動作には影響しない（次回は 100% になるだけ）
+  }
+}
+// 前回の倍率を復元する
+try {
+  const saved = Number(localStorage.getItem(ZOOM_KEY));
+  if (saved > 0) setZoom(saved);
+} catch {
+  // 読み込めなければ 100% のまま
+}
+// Ctrl+マウスホイールで拡大・縮小する（編集ペインの上で。mde と同じ。タッチパッドの2本指の操作のように少しずつ
+// 届く場合は、ホイール1目盛り分（100）たまるごとに 10% ずつ変える）
+let zoomWheelDelta = 0;
+$('editor-wrap').addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  zoomWheelDelta += e.deltaY;
+  if (Math.abs(zoomWheelDelta) < 50) return;
+  setZoom(zoomLevel + (zoomWheelDelta < 0 ? ZOOM_STEP : -ZOOM_STEP));
+  zoomWheelDelta = 0;
+}, { passive: false });
+
 // ---- メニューバーのメニュー（ファイル・表示）----------------------------------
 /**
  * メニューバーのメニュー。button はメニューを開くボタン、key は Alt と一緒に押して開くキー、
@@ -1331,6 +1383,12 @@ const MENUS = {
       { label: 'ステータスバーを表示', checked: isPaneVisible('no-statusbar'), cmd: 'toggleStatusbar' },
       null,
       { label: 'ソースモード', checked: state.sourceMode, cmd: 'toggleSource' },
+      null,
+      // 表示倍率（mde のステータスバーの「－」「100%」「＋」と同じ）
+      { label: `表示倍率：${Math.round(zoomLevel * 100)}%`, heading: true },
+      { label: '拡大', key: 'Ctrl++', cmd: 'zoomIn', disabled: zoomLevel >= ZOOM_MAX },
+      { label: '縮小', key: 'Ctrl+-', cmd: 'zoomOut', disabled: zoomLevel <= ZOOM_MIN },
+      { label: '100%に戻す', key: 'Ctrl+0', cmd: 'zoomReset', disabled: 1 === zoomLevel },
       null,
       { label: '段落中の改行', heading: true },
       { label: 'ソースの通りに改行する', checked: !joinSoftBreaks, cmd: 'softBreakSource' },
@@ -1410,6 +1468,10 @@ window.addEventListener('keydown', (e) => {
   // 検証用：Ctrl+Shift+F12 で IME をオンにする（ホスト側の ForceImeOn 参照）
   if (e.ctrlKey && e.shiftKey && 'F12' === e.key) { e.preventDefault(); send({ cmd: 'imeOn' }); return; }
   if (!e.ctrlKey || e.altKey) return;
+  // 表示倍率：Ctrl++（日本語キーボードの Ctrl+; も）・Ctrl+-・Ctrl+0（テンキーも）
+  if ('+' === e.key || '=' === e.key || ';' === e.key) { e.preventDefault(); commands.zoomIn(); return; }
+  if ('-' === e.key) { e.preventDefault(); commands.zoomOut(); return; }
+  if ('0' === e.key && !e.shiftKey) { e.preventDefault(); commands.zoomReset(); return; }
   const k = e.key.toLowerCase();
   if ('s' === k) { e.preventDefault(); doSave(e.shiftKey); }
   else if ('o' === k) { e.preventDefault(); doOpen(); }

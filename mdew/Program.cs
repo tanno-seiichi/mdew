@@ -65,8 +65,9 @@ namespace mdew
             m_startupPath = ResolveStartupPath(a_startupPath);
             m_startupBounds = ParsePlacement(a_placement, out m_startupMaximized);
             Title = $"{Program.AppName} v{Program.Version}";
-            Width = 1100;
-            Height = 800;
+            // 初めて起動した時のウィンドウの大きさ（mde と同じ。2回目からは前回終了時の大きさ）
+            Width = 810;
+            Height = 670;
             Content = m_webView;
             Loaded += async (s, e) => await InitializeWebViewAsync();
             Closing += OnClosing;
@@ -106,6 +107,9 @@ namespace mdew
             // （F12・Ctrl+Shift+I の開発者ツールも無効になるため、F12 は HTML 側から devTools で開く）
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
+            // Ctrl+マウスホイールで画面全体（メニュー等も）が拡大されないようにする。文書の表示倍率は HTML 側で変える
+            // （web\js\main.js の setZoom）
+            core.Settings.IsZoomControlEnabled = false;
 
             string webDir = Path.Combine(AppContext.BaseDirectory, "web");
             core.SetVirtualHostNameToFolderMapping(APP_HOST, webDir, CoreWebView2HostResourceAccessKind.Allow);

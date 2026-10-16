@@ -61,6 +61,8 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
      文字を書く幅は最大 884px で、中央に置く。左右の余白は 30px（ウィンドウが狭い時に、文字を書く幅を広く取る） */
   box-sizing: border-box; min-height: 100%;
   padding: 24px max(30px, calc((100% - 884px) / 2)) 120px;
+  /* 表示倍率（メニュー「表示」→「拡大」「縮小」・Ctrl+マウスホイール。main.js の setZoom）：文字・画像・余白をまとめて拡大・縮小する */
+  zoom: var(--zoom, 1);
 }
 /* 文書の見た目は、PDF に書き出す時の印刷用の文書（#print-doc）にも使う */
 :is(#doc, #print-doc) {
@@ -147,7 +149,7 @@ body.source-mode #source-wrap { display: block; }
 body.source-mode #editor-wrap { overflow: hidden; }
 #source, #source-backdrop {
   position: absolute; inset: 0; margin: 0; border: 0; box-sizing: border-box; padding: 32px 40px;
-  font-family: var(--doc-font); font-size: var(--doc-font-size); line-height: 1.6; letter-spacing: normal;
+  font-family: var(--doc-font); font-size: calc(var(--doc-font-size) * var(--zoom, 1)); line-height: 1.6; letter-spacing: normal;
   white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 4;
   overflow-x: hidden; overflow-y: scroll;
 }
