@@ -2154,6 +2154,11 @@ function detectBulletMarker(a_markdown) {
 /** 開いているメニュー（showMenu）を閉じる関数（開いていなければ null）。 */
 let s_closeMenu = null;
 
+/** 開いているメニュー（showMenu）があれば閉じる。 */
+export function closeMenu() {
+  if (s_closeMenu) s_closeMenu();
+}
+
 /** サブメニューを持つ項目にマウスを乗せてから開くまで・ほかの項目へ移ってから閉じるまでの時間（ミリ秒。Windows の
  * メニューの既定値と同じ）。 */
 const SUBMENU_HOVER_DELAY_MS = 400;

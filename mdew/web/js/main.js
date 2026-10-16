@@ -20,7 +20,7 @@
 //                {cmd:'findCommand', action, query, replacement, folder, matchCase, regex, index} /
 //                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls} /
 //                {cmd:'tableSize', rows, cols} / {cmd:'linkUrl', url}
-import { Editor, showMenu } from './editor.js';
+import { Editor, showMenu, closeMenu } from './editor.js';
 import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
 import { FindEngine } from './find.js';
@@ -1417,6 +1417,7 @@ let menuWasOpen = false;
  * @param {boolean} [a_keyboard] キーボード（Alt+F 等・左右の矢印キー）で開いたか（最初の項目を選んだ状態で開く）
  */
 function showBarMenu(a_name, a_keyboard = false) {
+  barMenuMode = false;
   const def = MENUS[a_name];
   const rect = def.button.getBoundingClientRect();
   showMenu(rect.left, rect.bottom + 2, def.items(), (a_item) => (a_item.run ? a_item.run() : commands[a_item.cmd]()),
@@ -1500,9 +1501,22 @@ for (const [name, def] of Object.entries(MENUS)) {
   });
   // 別のメニューが開いている時は、ボタンにマウスを乗せただけで、そのメニューに切り替える（Windows のメニューと同じ）
   def.button.addEventListener('mouseenter', () => {
-    if (openMenuName && openMenuName !== name) showBarMenu(name);
+    if ((openMenuName && openMenuName !== name) || barMenuMode) showBarMenu(name);
   });
 }
+/** メニューを開いている間に、マウスをメニューを持たないボタン（「検索と置換」）へ移したか（その間にマウスを
+ * メニューのボタンへ戻したら、そのメニューを開く。Windows のメニューバーと同じ）。 */
+let barMenuMode = false;
+// メニューを開いている間に「検索と置換」へマウスを移したら、開いているメニューを閉じる
+document.querySelectorAll('#menubar > button[data-cmd]').forEach((button) => {
+  button.addEventListener('mouseenter', () => {
+    if (!openMenuName) return;
+    closeMenu();
+    barMenuMode = true;
+  });
+});
+// メニューバーの外へマウスを移したら、メニューを開いていない状態に戻る
+$('menubar').addEventListener('mouseleave', () => { barMenuMode = false; });
 
 // ショートカット：Ctrl+S 保存、Ctrl+Shift+S 名前を付けて保存、Ctrl+O 開く、Ctrl+N 新規、Ctrl+F 検索と置換、
 // Ctrl+P PDFに書き出し、Ctrl+W 閉じる、F1 Readmeを開く、F12 開発者ツール、
