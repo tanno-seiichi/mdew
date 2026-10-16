@@ -57,7 +57,10 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
 
 /* ===== 文書の見た目 ===== */
 #doc {
-  max-width: 980px; margin: 0 auto; padding: 24px 48px 120px;
+  /* 編集ペインの全体を編集領域にする（文書の下・左右の余白をクリックしても、近い行にカーソルが置かれるように）。
+     文字を書く幅は、これまでどおり最大 884px（980px から左右の余白 48px を除いた幅）で、中央に置く */
+  box-sizing: border-box; min-height: 100%;
+  padding: 24px max(48px, calc((100% - 884px) / 2)) 120px;
 }
 /* 文書の見た目は、PDF に書き出す時の印刷用の文書（#print-doc）にも使う */
 :is(#doc, #print-doc) {
