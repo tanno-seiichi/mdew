@@ -3,7 +3,7 @@
   <Package
 	  Name="mdew"
 	  Manufacturer="tanno-seiichi"
-	  Version="0.0.8"
+	  Version="0.0.9"
 	  UpgradeCode="{AFEE0BE8-B18A-490E-AFF1-2DFFCDC17439}"
 	  Scope="perMachine">
 	  
