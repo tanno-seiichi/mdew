@@ -12,7 +12,8 @@
 //                {cmd:'clearRecentFolders'} / {cmd:'close'} / {cmd:'openReadme'} /
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs} /
 //                {cmd:'tableSizeDialog'} / {cmd:'linkDialog'} /
-//                {cmd:'showMenu', name, x, y, items, buttons, keyboard}
+//                {cmd:'showMenu', name, x, y, items, buttons, keyboard} /
+//                {cmd:'confirmClose', files:[{path, markdown, images, current}]}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
 //                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug, tempDir} /
@@ -21,7 +22,8 @@
 //                {cmd:'findCommand', action, query, replacement, folder, matchCase, regex, index} /
 //                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls} /
 //                {cmd:'tableSize', rows, cols} / {cmd:'linkUrl', url} /
-//                {cmd:'menuSelected', id} / {cmd:'menuClosed', name} / {cmd:'menuSwitch', name, keyboard}
+//                {cmd:'menuSelected', id} / {cmd:'menuClosed', name} / {cmd:'menuSwitch', name, keyboard} /
+//                {cmd:'confirmClose'}
 import { Editor, showMenu, closeMenu } from './editor.js';
 import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
@@ -666,19 +668,36 @@ function folderFiles() {
   });
 }
 
+/**
+ * 開いているファイルを保存する内容（「すべて保存」・閉じる時の保存で、ホストに渡す）。
+ * 保存が終わった時（saved）のために、編集部分の内容を state.pendingSave に覚えておく（doSave と同じ）。
+ * @returns {{path: string, markdown: string, images: string[], current: boolean}}
+ */
+function currentSaveEntry() {
+  if (state.sourceMode) {
+    state.pendingSave = null;
+    return { path: state.path, markdown: sourceArea.value, images: imageSourcesIn(sourceArea.value), current: true };
+  }
+  const result = editor.serialize();
+  state.pendingSave = result;
+  return { path: state.path, markdown: result.text, images: editor.collectImageSources(), current: true };
+}
+
+/**
+ * 保存していない内容をすべて集める（開いているファイル（新規の文書も含む）と、保存せずに置いてあるファイル）。
+ * ウィンドウを閉じる時の確認（ホストからの confirmClose）で使う。
+ * @returns {{path: string, markdown: string, images: string[], current?: boolean}[]}
+ */
+function unsavedFiles() {
+  const files = state.dirty ? [currentSaveEntry()] : [];
+  for (const p of pendingEdits.values()) files.push({ path: p.path, markdown: p.markdown, images: p.images || [] });
+  return files;
+}
+
 /** メニュー「ファイル」→「すべて保存」：開いているファイルと、保存せずに置いてあるファイルをすべて保存する。 */
 function doSaveAll() {
   const files = [];
-  if (state.path && state.dirty) {
-    if (state.sourceMode) {
-      state.pendingSave = null;
-      files.push({ path: state.path, markdown: sourceArea.value, images: imageSourcesIn(sourceArea.value), current: true });
-    } else {
-      const result = editor.serialize();
-      state.pendingSave = result;
-      files.push({ path: state.path, markdown: result.text, images: editor.collectImageSources(), current: true });
-    }
-  }
+  if (state.path && state.dirty) files.push(currentSaveEntry());
   for (const p of pendingEdits.values()) files.push({ path: p.path, markdown: p.markdown, images: p.images || [] });
   // 保存するものが無ければ何もしない（mde と同じ。新規の文書は対象外。「保存」で保存する）
   if (!files.length) return;
@@ -1706,6 +1725,10 @@ if (host) {
       const resolve = folderFilesWaiters.get(msg.reqId);
       folderFilesWaiters.delete(msg.reqId);
       if (resolve) resolve(msg.files || []);
+    } else if ('confirmClose' === msg.cmd) {
+      // ウィンドウを閉じる：保存していない内容をホストに渡す。ホストが「閉じる前に保存しますか？」を出し、
+      // 「はい」ならこれを保存してから閉じる（Program.cs の ConfirmClose）
+      send({ cmd: 'confirmClose', files: unsavedFiles() });
     } else if ('savedAll' === msg.cmd) {
       // すべて保存が終わった（開いているファイルの分は、先に saved が届いている）
       for (const p of msg.saved || []) pendingEdits.delete(pathKey(p));

@@ -43,8 +43,12 @@ namespace mdew
         private bool m_useCrLf = true;
         /// <summary>保存時に UTF-8 の BOM を付けるか（読み込んだファイルに合わせる。新規は付けない）。</summary>
         private bool m_hasBom;
-        /// <summary>閉じる時の「破棄して閉じますか」に「はい」と答えたか（確認を 2 回出さないため）。</summary>
+        /// <summary>閉じる時の確認が済んだか（「いいえ」（保存しない）と答えた・保存し終えた。確認を 2 回出さないため）。</summary>
         private bool m_closeConfirmed;
+        /// <summary>閉じる時の確認のため、HTML 側に保存していない内容を問い合わせているところか（ConfirmClose 参照）。</summary>
+        private bool m_closeQueryPending;
+        /// <summary>HTML 側から返事が無い時に、保存できない旨の確認を出すためのタイマー（ConfirmClose 参照）。</summary>
+        private System.Windows.Threading.DispatcherTimer m_closeQueryTimer;
         /// <summary>開いているファイルのフォルダ（相対パスの画像の基準）。</summary>
         private string m_docFolder;
         /// <summary>画像の URL に入れる世代番号（ファイルを開き直すたびに増やす。SetDocumentFolder 参照）。</summary>
@@ -276,6 +280,9 @@ namespace mdew
                     break;
                 case "saveAll":
                     SaveAll(root.GetProperty("files"));
+                    break;
+                case "confirmClose":
+                    ConfirmClose(root.GetProperty("files"));
                     break;
                 case "openFind":
                     ShowFindWindow();
@@ -1855,14 +1862,11 @@ namespace mdew
         {
             if (m_isDirty && !m_closeConfirmed)
             {
-                var result = MessageBox.Show(this, "保存されていない変更があります。破棄して閉じますか？",
-                    Program.AppName, MessageBoxButton.YesNo, MessageBoxImage.Warning);
-                if (MessageBoxResult.Yes != result)
-                {
-                    a_args.Cancel = true;
-                    return;
-                }
-                m_closeConfirmed = true;
+                // いったん閉じるのをやめ、保存していない内容を HTML 側に問い合わせる（confirmClose）。返事が届いたら、
+                // ConfirmClose で「閉じる前に保存しますか？」を出す（保存する内容・ファイル名は HTML 側にあるため）
+                a_args.Cancel = true;
+                QueryUnsavedForClose();
+                return;
             }
             if (null != m_findWindow)
             {
@@ -1870,6 +1874,144 @@ namespace mdew
                 m_findWindow.Close();
             }
             SaveWindowPlacement();
+        }
+
+        /// <summary>閉じる時の確認のため、保存していない内容を HTML 側に問い合わせる（confirmClose を送る）。
+        /// 画面が応答しない等で 3 秒たっても返事が無ければ、保存はできない旨の確認を出す（閉じられなくならないように）。</summary>
+        private void QueryUnsavedForClose()
+        {
+            if (m_closeQueryPending)
+            {
+                return;
+            }
+            m_closeQueryPending = true;
+            m_closeQueryTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            m_closeQueryTimer.Tick += (s, e) => ConfirmClose(null);
+            m_closeQueryTimer.Start();
+            try
+            {
+                Post(new { cmd = "confirmClose" });
+            }
+            catch (Exception ex)
+            {
+                ErrorLog.Write("閉じる時の問い合わせに失敗", ex);
+                ConfirmClose(null);
+            }
+        }
+
+        /// <summary>閉じる時の確認（「…は変更されています。閉じる前に保存しますか？」。dialog\ConfirmDialog）を出す。
+        /// はい：保存してから閉じる（保存先を選ぶダイアログでキャンセルした・保存に失敗した時は閉じない）。
+        /// いいえ：保存せずに閉じる。キャンセル：閉じない。</summary>
+        /// <param name="a_files">HTML 側から届いた、保存していない内容（path・markdown・images・current の配列。
+        /// 開いているファイルが先頭）。HTML 側から返事が無かった時は null（保存はできないので、保存せずに閉じるかだけ確認する）。</param>
+        private void ConfirmClose(JsonElement? a_files)
+        {
+            if (!m_closeQueryPending)
+            {
+                return;
+            }
+            m_closeQueryPending = false;
+            m_closeQueryTimer?.Stop();
+            m_closeQueryTimer = null;
+
+            // 変更されているファイルの名前（多い時は 4 個まで出して、残りは「ほか n 個のファイル」）
+            var names = new System.Collections.Generic.List<string>();
+            if (a_files.HasValue)
+            {
+                foreach (JsonElement f in a_files.Value.EnumerateArray())
+                {
+                    string path = f.GetProperty("path").GetString();
+                    names.Add(string.IsNullOrEmpty(path) ? "無題" : Path.GetFileName(path));
+                }
+                if (0 == names.Count)
+                {
+                    // 問い合わせている間に保存された等で、保存していない内容が無くなった
+                    m_closeConfirmed = true;
+                    Close();
+                    return;
+                }
+            }
+            else
+            {
+                names.Add(string.IsNullOrEmpty(m_currentPath) ? "無題" : Path.GetFileName(m_currentPath));
+            }
+            var lines = new StringBuilder();
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (4 == i && 5 < names.Count)
+                {
+                    lines.Append($"ほか {names.Count - 4} 個のファイル\n");
+                    break;
+                }
+                lines.Append(names[i]).Append('\n');
+            }
+            string message = a_files.HasValue
+                ? lines + "は変更されています。閉じる前に保存しますか？"
+                : lines + "は変更されています。\n画面が応答しないため保存できません。保存せずに閉じますか？";
+
+            var confirm = new dialog.ConfirmDialog(message, a_files.HasValue) { Owner = this, Title = Program.AppName };
+            confirm.ShowDialog();
+            if (dialog.ConfirmDialog.Answer.No == confirm.Result
+                || (dialog.ConfirmDialog.Answer.Yes == confirm.Result && !a_files.HasValue))
+            {
+                m_closeConfirmed = true;
+                Close();
+            }
+            else if (dialog.ConfirmDialog.Answer.Yes == confirm.Result)
+            {
+                SaveForClose(a_files.Value);
+            }
+        }
+
+        /// <summary>閉じる時の確認で「はい」：保存していない内容をすべて保存し、すべて保存できたら閉じる。
+        /// 開いているファイルは SaveFile（新規の文書は保存先を選ぶ。キャンセルしたら閉じない）、それ以外のファイル
+        /// （フォルダを開いている時に、保存せずに置いておいた内容）は WriteOtherFile で書き出す（SaveAll と同じ）。
+        /// 保存に失敗したファイルがあれば、savedAll で知らせて閉じない。</summary>
+        /// <param name="a_files">保存する内容（path・markdown・images・current の配列）。</param>
+        private void SaveForClose(JsonElement a_files)
+        {
+            var saved = new System.Collections.Generic.List<string>();
+            var failed = new System.Collections.Generic.List<object>();
+            foreach (JsonElement f in a_files.EnumerateArray())
+            {
+                string path = f.GetProperty("path").GetString();
+                string markdown = f.GetProperty("markdown").GetString();
+                if (f.TryGetProperty("current", out JsonElement currentElement) && currentElement.GetBoolean())
+                {
+                    var images = new System.Collections.Generic.List<string>();
+                    if (f.TryGetProperty("images", out JsonElement imagesElement) && JsonValueKind.Array == imagesElement.ValueKind)
+                    {
+                        foreach (JsonElement item in imagesElement.EnumerateArray()) images.Add(item.GetString());
+                    }
+                    if (SaveFile(markdown, false, images, out string error))
+                    {
+                        saved.Add(m_currentPath);
+                        continue;
+                    }
+                    if (null == error)
+                    {
+                        return; // 保存先を選ぶダイアログでキャンセルした：閉じない（ほかのファイルも保存しない）
+                    }
+                    failed.Add(new { path = string.IsNullOrEmpty(path) ? "(無題)" : path, message = error });
+                    continue;
+                }
+                try
+                {
+                    WriteOtherFile(path, markdown);
+                    saved.Add(path);
+                }
+                catch (Exception ex)
+                {
+                    failed.Add(new { path, message = ex.Message });
+                }
+            }
+            if (0 == failed.Count)
+            {
+                m_closeConfirmed = true;
+                Close();
+                return;
+            }
+            Post(new { cmd = "savedAll", saved, failed });
         }
 
         // ===== ウィンドウの位置・サイズの保存と復元 =====
