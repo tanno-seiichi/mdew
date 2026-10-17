@@ -1008,6 +1008,8 @@ function setSourceMode(a_on) {
     const topPos = result.positions.find((p) => p.el.getBoundingClientRect().bottom > wrapTop + 1);
     state.sourceMode = true;
     document.body.classList.add('source-mode');
+    // 入力欄のスクロールバーの幅（文字を書く幅を Markdown モードとそろえるため。app.css の --source-side）
+    $('source-wrap').style.setProperty('--source-scrollbar', `${sourceArea.offsetWidth - sourceArea.clientWidth}px`);
     setSourceText(result.text);
     sourcePositions = result.positions;
     sourceArea.focus();
@@ -1234,14 +1236,16 @@ function isPaneVisible(a_class) {
   return !document.body.classList.contains(a_class);
 }
 /**
- * ステータスバーの「フォルダを隠す／表示」「アウトラインを隠す／表示」のボタンの文字を、今の表示に合わせる（mde と同じ）。
- * body のクラス（no-folderpane・no-outline）が変わるたびに呼ばれる（下の MutationObserver）。
+ * ステータスバーの「フォルダを隠す／表示」「アウトラインを隠す／表示」（mde と同じ）・「ソースモードに切替／Markdownモードに切替」
+ * のボタンの文字を、今の表示に合わせる。
+ * body のクラス（no-folderpane・no-outline・source-mode）が変わるたびに呼ばれる（下の MutationObserver）。
  */
 function updatePaneButtons() {
   $('status-folder').textContent = isPaneVisible('no-folderpane') ? 'フォルダを隠す' : 'フォルダを表示';
   $('status-outline').textContent = isPaneVisible('no-outline') ? 'アウトラインを隠す' : 'アウトラインを表示';
+  $('status-source').textContent = document.body.classList.contains('source-mode') ? 'Markdownを表示' : 'ソースを表示';
 }
-for (const [id, cmd] of [['status-folder', 'toggleFolder'], ['status-outline', 'toggleOutline']]) {
+for (const [id, cmd] of [['status-folder', 'toggleFolder'], ['status-outline', 'toggleOutline'], ['status-source', 'toggleSource']]) {
   // mousedown で既定の動作を止めて、編集中のカーソル位置を保つ
   $(id).addEventListener('mousedown', (e) => e.preventDefault());
   $(id).addEventListener('click', () => commands[cmd]());

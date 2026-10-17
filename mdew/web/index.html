@@ -34,10 +34,11 @@
       </section>
     </main>
     <footer id="statusbar">
-      <!-- フォルダビュー・アウトラインの表示・非表示をワンクリックで切り替える（mde と同じ。main.js の updatePaneButtons）。
-           フォルダのボタンは、フォルダを開いている時だけ出す -->
+      <!-- フォルダビュー・アウトラインの表示・非表示、ソースモードと Markdown モードをワンクリックで切り替える
+           （main.js の updatePaneButtons）。フォルダのボタンは、フォルダを開いている時だけ出す -->
       <button id="status-folder" class="status-btn" title="フォルダビューの表示・非表示">フォルダを隠す</button>
       <button id="status-outline" class="status-btn" title="アウトラインの表示・非表示">アウトラインを隠す</button>
+      <button id="status-source" class="status-btn" title="ソースモードと Markdownモードの切替">ソースを表示</button>
       <span id="status-dirty"></span>
       <!-- 停止・入力遅延の回数は、Debug ビルドの時だけ表示する（main.js の startStallMonitor） -->
       <span id="status-stall" class="debug-only" title="画面の処理が200ms以上止まった回数（IMEフリーズ検証用）">停止 0回</span>

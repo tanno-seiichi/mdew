@@ -164,7 +164,12 @@ body.source-mode #doc { display: none; }
 body.source-mode #source-wrap { display: block; }
 body.source-mode #editor-wrap { overflow: hidden; }
 #source, #source-backdrop {
-  position: absolute; inset: 0; margin: 0; border: 0; box-sizing: border-box; padding: 32px 40px;
+  /* 左右の余白・文字を書く幅は、Markdown モード（#doc）と同じにする（1行に入る文字数をそろえる）：余白は 30px、
+     文字を書く幅は最大 884px で中央に置く（「編集ペインの幅に合わせる」の時は余白 30px だけ）。#doc は表示倍率で
+     余白・幅もまとめて拡大・縮小する（zoom）ので、ここでも表示倍率を掛ける。入力欄は自分のスクロールバーの分だけ
+     文字を書く幅が狭くなるので、その幅（--source-scrollbar。main.js の setSourceMode で測る）を除いて中央に置く */
+  --source-side: max(calc(30px * var(--zoom, 1)), calc((100% - var(--source-scrollbar, 0px) - 884px * var(--zoom, 1)) / 2));
+  position: absolute; inset: 0; margin: 0; border: 0; box-sizing: border-box; padding: 32px var(--source-side);
   font-family: var(--doc-font); font-size: calc(var(--doc-font-size) * var(--zoom, 1)); line-height: 1.6; letter-spacing: normal;
   white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 4;
   overflow-x: hidden; overflow-y: scroll;
@@ -173,6 +178,7 @@ body.source-mode #editor-wrap { overflow: hidden; }
 #source-backdrop mark { color: transparent; background: #ffe166; }
 #source-backdrop mark.current { background: #ffa54d; }
 #source { background: transparent; color: #000000; resize: none; outline: none; }
+body.full-width :is(#source, #source-backdrop) { --source-side: calc(30px * var(--zoom, 1)); }
 
 /* フォルダビュー（「フォルダを開く...」で開いた時だけ表示。行の色は mde と同じ） */
 #folder {
