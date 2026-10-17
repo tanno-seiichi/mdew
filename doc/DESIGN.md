@@ -17,7 +17,7 @@ mde の画面を HTML で作り直したアプリケーションです。この�
     実行フォルダの直下にコピーされます）。
   - `dialog\AboutWindow.xaml`：バージョン情報のウィンドウ（mde から移植）
   - `dialog\FindReplaceWindow.xaml`：検索と置換のウィンドウ（mde から移植。検索・置換の処理は `web\js\find.js`）
-  - `dialog\DialogStyles.xaml`：ダイアログの部品（ボタン・入力欄・チェックボックス等）の Windows 11 風の見た目（メッセージボックスとそろえる。今は検索と置換で使う）
+  - `dialog\DialogStyles.xaml`：ダイアログの部品（ボタン・入力欄・チェックボックス等）の Windows 11 風の見た目（メッセージボックスとそろえる。検索と置換・リンク・表を挿入・PDF の余白で使う）
   - `dialog\PdfMarginDialog.xaml`：PDF の余白の設定（mde から移植）
   - `dialog\TableSizeDialog.xaml`：右クリックの「表を挿入…」の行数・列数の指定（mde から移植）
   - `dialog\LinkInputDialog.xaml`：右クリックの「リンクにする…」の URL の入力（mde から移植）

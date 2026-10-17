@@ -9,15 +9,20 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        FontFamily="Segoe UI, Yu Gothic UI"
-        FontSize="13"
+        FontFamily="Yu Gothic UI, Meiryo UI, Segoe UI"
+        FontSize="12"
         Background="#FFFFFF">
     <Window.Resources>
-        <Style x:Key="Caption" TargetType="TextBlock">
-            <Setter Property="Margin" Value="0,0,0,4"/>
-            <Setter Property="Foreground" Value="#555555"/>
-            <Setter Property="FontSize" Value="12"/>
-        </Style>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <!-- 部品（ボタン・入力欄）の見た目。検索と置換と同じ Windows 11 風のもの（dialog\DialogStyles.xaml） -->
+            <ResourceDictionary Source="/mdew;component/dialog/DialogStyles.xaml"/>
+        </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="Caption" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,0,0,4"/>
+                <Setter Property="Foreground" Value="#555555"/>
+            </Style>
+        </ResourceDictionary>
     </Window.Resources>
     <StackPanel Margin="22">
         <TextBlock Text="PDFに書き出す際の、上下左右の余白（px）を設定してください" Margin="0,0,0,16"
@@ -36,9 +41,9 @@
         <TextBox x:Name="m_rightBox" Margin="0,0,0,22" Padding="6,4"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="既定値に戻す" Width="100" Height="30" Margin="0,0,8,0" Click="ResetClick"/>
-            <Button Content="キャンセル" Width="84" Height="30" Margin="0,0,8,0" IsCancel="True"/>
-            <Button Content="OK" Width="84" Height="30" IsDefault="True" Click="OkClick"/>
+            <Button Content="既定値に戻す" MinWidth="100" Margin="0,0,8,0" Click="ResetClick"/>
+            <Button Content="キャンセル" MinWidth="84" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="OK" MinWidth="84" IsDefault="True" Click="OkClick"/>
         </StackPanel>
     </StackPanel>
 </Window>

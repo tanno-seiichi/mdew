@@ -9,19 +9,27 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        FontFamily="Segoe UI, Yu Gothic UI"
-        FontSize="13"
+        FontFamily="Yu Gothic UI, Meiryo UI, Segoe UI"
+        FontSize="12"
         Background="#FFFFFF">
+    <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <!-- 部品（ボタン・入力欄）の見た目。検索と置換と同じ Windows 11 風のもの（dialog\DialogStyles.xaml） -->
+            <ResourceDictionary Source="/mdew;component/dialog/DialogStyles.xaml"/>
+        </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
     <StackPanel Margin="22">
         <TextBlock Text="リンク先のURLを入力してください" Margin="0,0,0,16"
                    Foreground="#1C1C1C" FontWeight="Bold"/>
 
-        <TextBlock Text="URL" Margin="0,0,0,4" Foreground="#555555" FontSize="12"/>
+        <TextBlock Text="URL" Margin="0,0,0,4" Foreground="#555555"/>
         <TextBox x:Name="m_urlBox" Margin="0,0,0,14" Padding="6,4"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="キャンセル" Width="84" Height="30" Margin="0,0,8,0" IsCancel="True"/>
-            <Button Content="OK" Width="84" Height="30" IsDefault="True" Click="OkClick"/>
+            <Button Content="キャンセル" MinWidth="84" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="OK" MinWidth="84" IsDefault="True" Click="OkClick"/>
         </StackPanel>
     </StackPanel>
 </Window>
