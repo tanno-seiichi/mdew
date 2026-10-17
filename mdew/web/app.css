@@ -65,6 +65,9 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
   /* 表示倍率（メニュー「表示」→「拡大」「縮小」・Ctrl+マウスホイール。main.js の setZoom）：文字・画像・余白をまとめて拡大・縮小する */
   zoom: var(--zoom, 1);
 }
+/* メニュー「表示」→「本文の幅」→「編集ペインの幅に合わせる」（main.js の setFullWidth）：最大 884px の制限をなくし、
+   左右の余白 30px を除いた編集ペインの幅いっぱいに表示する */
+body.full-width #doc { padding-left: 30px; padding-right: 30px; }
 /* 文書の見た目は、PDF に書き出す時の印刷用の文書（#print-doc）にも使う */
 :is(#doc, #print-doc) {
   font-family: var(--doc-font); font-size: var(--doc-font-size); line-height: var(--doc-line-height); outline: none;

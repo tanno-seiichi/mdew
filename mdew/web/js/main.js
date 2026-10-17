@@ -1174,6 +1174,8 @@ const commands = {
   toggleStatusbar: () => togglePane('no-statusbar'),
   softBreakSource: () => setSoftBreakMode(false),
   softBreakJoin: () => setSoftBreakMode(true),
+  docWidthLimited: () => setFullWidth(false),
+  docWidthFull: () => setFullWidth(true),
   toggleSource: () => setSourceMode(!state.sourceMode),
   zoomIn: () => setZoom(zoomLevel + ZOOM_STEP),
   zoomOut: () => setZoom(zoomLevel - ZOOM_STEP),
@@ -1278,6 +1280,36 @@ try {
   // 読み込めなければ既定（空行が入るまで改行しない）のまま
 }
 setJoinSoftBreaks(joinSoftBreaks);
+
+// ---- 本文の幅（読みやすい幅（最大 884px）か、編集ペインの幅いっぱいか。次回起動時も同じにする）--------
+/** localStorage に保存するキー（値は 'full'：編集ペインの幅に合わせる、'limited'：読みやすい幅にする）。 */
+const DOC_WIDTH_KEY = 'docWidth';
+/** 本文を編集ペインの幅いっぱいに広げているか（false が既定：最大 884px で中央に置く）。 */
+let fullWidth = false;
+
+/**
+ * 本文の幅を切り替える（app.css の body.full-width）。広い表も、本文の幅に合わせて広く表示される。
+ * 文書の中の今見ている位置は保つ。
+ * @param {boolean} a_full true：編集ペインの幅に合わせる、false：読みやすい幅（最大 884px）にする
+ */
+function setFullWidth(a_full) {
+  const wrap = $('editor-wrap');
+  const ratio = wrap.scrollHeight > wrap.clientHeight ? wrap.scrollTop / (wrap.scrollHeight - wrap.clientHeight) : 0;
+  fullWidth = a_full;
+  document.body.classList.toggle('full-width', a_full);
+  if (wrap.scrollHeight > wrap.clientHeight) wrap.scrollTop = ratio * (wrap.scrollHeight - wrap.clientHeight);
+  try {
+    localStorage.setItem(DOC_WIDTH_KEY, a_full ? 'full' : 'limited');
+  } catch {
+    // 保存できなくても動作には影響しない（次回は既定の幅になるだけ）
+  }
+}
+// 前回の幅を復元する
+try {
+  if ('full' === localStorage.getItem(DOC_WIDTH_KEY)) setFullWidth(true);
+} catch {
+  // 読み込めなければ既定（読みやすい幅）のまま
+}
 
 // ---- 表示倍率（mde のステータスバーの「－」「100%」「＋」と同じ。次回起動時も同じにする）----------
 /** localStorage に保存するキー（値は倍率。1 が 100%）。 */
@@ -1395,6 +1427,10 @@ const MENUS = {
       { label: '段落中の改行', heading: true },
       { label: 'ソースの通りに改行する', checked: !joinSoftBreaks, cmd: 'softBreakSource' },
       { label: '空行が入るまで改行しない', checked: joinSoftBreaks, cmd: 'softBreakJoin' },
+      null,
+      { label: '本文の幅', heading: true },
+      { label: '読みやすい幅にする（最大 884px）', checked: !fullWidth, cmd: 'docWidthLimited' },
+      { label: '編集ペインの幅に合わせる', checked: fullWidth, cmd: 'docWidthFull' },
     ],
   },
   help: {
