@@ -1899,7 +1899,7 @@ namespace mdew
             }
         }
 
-        /// <summary>閉じる時の確認（「…は変更されています。閉じる前に保存しますか？」。dialog\ConfirmDialog）を出す。
+        /// <summary>閉じる時の確認（「…は変更されています。閉じる前に保存しますか？」。Windows のメッセージボックス）を出す。
         /// はい：保存してから閉じる（保存先を選ぶダイアログでキャンセルした・保存に失敗した時は閉じない）。
         /// いいえ：保存せずに閉じる。キャンセル：閉じない。</summary>
         /// <param name="a_files">HTML 側から届いた、保存していない内容（path・markdown・images・current の配列。
@@ -1949,15 +1949,27 @@ namespace mdew
                 ? lines + "は変更されています。閉じる前に保存しますか？"
                 : lines + "は変更されています。\n画面が応答しないため保存できません。保存せずに閉じますか？";
 
-            var confirm = new dialog.ConfirmDialog(message, a_files.HasValue) { Owner = this, Title = Program.AppName };
-            confirm.ShowDialog();
-            if (dialog.ConfirmDialog.Answer.No == confirm.Result
-                || (dialog.ConfirmDialog.Answer.Yes == confirm.Result && !a_files.HasValue))
+            // Windows のメッセージボックスで確認する（はい・いいえ・キャンセル。既定は「はい」）。新しい見た目で表示されるよう、
+            // app.manifest でコモンコントロール 6 を使う設定にしている
+            if (!a_files.HasValue)
+            {
+                // HTML 側から返事が無い：保存はできないので、保存せずに閉じるかだけ確認する（既定は「いいえ」）
+                if (MessageBoxResult.Yes == MessageBox.Show(this, message, Program.AppName, MessageBoxButton.YesNo,
+                    MessageBoxImage.Question, MessageBoxResult.No))
+                {
+                    m_closeConfirmed = true;
+                    Close();
+                }
+                return;
+            }
+            MessageBoxResult result = MessageBox.Show(this, message, Program.AppName, MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question, MessageBoxResult.Yes);
+            if (MessageBoxResult.No == result)
             {
                 m_closeConfirmed = true;
                 Close();
             }
-            else if (dialog.ConfirmDialog.Answer.Yes == confirm.Result)
+            else if (MessageBoxResult.Yes == result)
             {
                 SaveForClose(a_files.Value);
             }

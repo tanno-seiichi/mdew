@@ -22,6 +22,9 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- アプリのアイコン -->
     <ApplicationIcon>images\mde.ico</ApplicationIcon>
+    <!-- アプリのマニフェスト（app.manifest）。コモンコントロール 6 を使う設定で、Windows のメッセージボックス
+         （MessageBox.Show）が、今の Windows の見た目（角丸のボタン等）で表示されるようにする -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- 64bit（x64）の Windows だけを対象にする。RuntimeIdentifier を指定すると、WebView2 の
          WebView2Loader.dll（ネイティブ DLL）は x64 用だけが実行フォルダの直下にコピーされる
          （指定しないと runtimes\win-x64・win-x86・win-arm64 の３つがコピーされる）。

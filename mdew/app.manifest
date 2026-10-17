@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- mdew：アプリのマニフェスト（mdew.csproj の ApplicationManifest で exe に埋め込む）。
+
+     コモンコントロール 6（Microsoft.Windows.Common-Controls 6.0）を使う設定。これが無いと、Windows の
+     メッセージボックス（MessageBox.Show。閉じる時の「閉じる前に保存しますか？」等）が、古い見た目（Windows 2000
+     のころの四角いボタン等）で表示される。WPF・WebView2 の画面は自分で描くので、この設定の影響を受けない。
+
+     asInvoker：管理者の権限を求めない（このファイルを指定しない時に埋め込まれる既定のマニフェストと同じ）。
+     DPI の設定は書かない（指定しない時と同じく、WPF の既定のまま）。 -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="mdew.app"/>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10・11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
+                        processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+</assembly>
