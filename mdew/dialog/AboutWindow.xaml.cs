@@ -18,6 +18,16 @@ namespace mdew.dialog
             this.m_appTitle.Content = this.Title;
             this.m_appVersion.Content = asm.GetName().Version?.ToString() ?? string.Empty;
             this.m_appCopyright.Content = asm.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? string.Empty;
+
+            // Esc・Enter キーで閉じる（メニューをキーボードで操作して開いた時も、マウスを使わずに閉じられるように）
+            this.PreviewKeyDown += (s, e) =>
+            {
+                if (System.Windows.Input.Key.Escape == e.Key || System.Windows.Input.Key.Enter == e.Key)
+                {
+                    e.Handled = true;
+                    Close();
+                }
+            };
         }
     }
 }

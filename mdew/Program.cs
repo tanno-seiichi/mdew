@@ -32,6 +32,9 @@ namespace mdew
 
         /// <summary>画面を表示する WebView2。</summary>
         private readonly WebView2 m_webView = new WebView2();
+        /// <summary>メニューバーのメニュー（ShowWebMenu）を開く時に、キーボードの入力先を WebView2 から一時的に移すための、
+        /// 見えない要素（WebView2 がキーボードの入力先のままだと、矢印キー等がメニューに届かない）。</summary>
+        private readonly System.Windows.Controls.Border m_focusSink = new System.Windows.Controls.Border { Focusable = true, Width = 0, Height = 0 };
         /// <summary>開いているファイルのパス。新規（未保存）は null。</summary>
         private string m_currentPath;
         /// <summary>保存していない変更があるか（HTML 側から dirty で知らされる）。</summary>
@@ -68,13 +71,25 @@ namespace mdew
             // 初めて起動した時のウィンドウの大きさ（mde と同じ。2回目からは前回終了時の大きさ）
             Width = 810;
             Height = 670;
-            Content = m_webView;
+            var root = new System.Windows.Controls.Grid();
+            root.Children.Add(m_webView);
+            root.Children.Add(m_focusSink);
+            Content = root;
             Loaded += async (s, e) => await InitializeWebViewAsync();
             Closing += OnClosing;
             // ほかのウィンドウで開いた・保存したファイルも、最近使ったファイルに出るよう、手前に来るたびに読み直す
             Activated += (s, e) =>
             {
                 if (null != m_webView.CoreWebView2) PostRecentFiles(AppSettings.Load());
+                // キーボードの入力先を WebView2 に戻す。バージョン情報等のダイアログを閉じた後、入力先が WebView2 に戻らず、
+                // Alt+F 等のメニューのショートカットやメニューの外の文字入力が効かないことがあるため（メニューを開いている間は除く）
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (IsActive && null == m_webMenu)
+                    {
+                        m_webView.Focus();
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Input);
             };
             // 前回終了時のウィンドウの位置・サイズ・最大化状態を復元する（RestoreWindowPlacement 参照）。
             // 初回起動時（まだ保存されていない時）は画面の中央に表示する。
@@ -276,6 +291,10 @@ namespace mdew
                     break;
                 case "pdfMargin":
                     ShowPdfMarginDialog();
+                    break;
+                case "showMenu":
+                    // メニューバーのメニュー（WPF のメニューで開く。見た目は HTML のメニューとそろえる）
+                    ShowWebMenu(root);
                     break;
                 case "tableSizeDialog":
                     // 右クリックのメニュー「表を挿入…」
@@ -707,6 +726,171 @@ namespace mdew
                 Post(new { cmd = "pdfExported", ok });
             }
         }
+
+        /// <summary>開いているメニューバーのメニュー（ShowWebMenu。開いていなければ null）。</summary>
+        private System.Windows.Controls.ContextMenu m_webMenu;
+        /// <summary>メニューバーのメニューの見た目（WebMenu.xaml。右クリックのメニュー（HTML）とそろえたもの）。</summary>
+        private static ResourceDictionary s_webMenuStyles;
+        /// <summary>メニューバーのメニューの枠の外側の、影を描くための透明な余白（WebMenu.xaml の WebMenuPanel と同じ）。</summary>
+        private const double WEB_MENU_SHADOW = 12;
+
+        /// <summary>メニューバーのメニューの見た目（WebMenu.xaml）を読み込む（初めて使う時に1回だけ）。</summary>
+        private static ResourceDictionary WebMenuStyles =>
+            s_webMenuStyles ??= (ResourceDictionary)Application.LoadComponent(new Uri("/mdew;component/WebMenu.xaml", UriKind.Relative));
+
+        /// <summary>メニューバーのメニューを、WPF のメニュー（ContextMenu）で開く。HTML のメニューは
+        /// ウィンドウの外へはみ出して表示できず、長いパスの「最近使ったファイル」等が省略されてしまうため。
+        /// 見た目は、右クリックのメニュー（HTML）とそろえる（WebMenu.xaml）。
+        /// 項目は HTML 側で作り（web\js\main.js の MENUS）、選ばれた項目の番号を menuSelected で返す。閉じたら menuClosed で
+        /// 知らせる。開いている間に別のメニューのボタンへマウスを移した時・左右の矢印キーを押した時は、menuSwitch で
+        /// 別のメニューを開いてもらう（Windows のメニューバーと同じ）。</summary>
+        /// <param name="a_msg">showMenu のメッセージ（name：メニューの名前、x・y：開く位置（画面側の座標）、items：項目、
+        /// buttons：メニューバーのボタンの名前と位置、keyboard：キーボードで開いたか）。</param>
+        private void ShowWebMenu(JsonElement a_msg)
+        {
+            if (null != m_webMenu)
+            {
+                m_webMenu.IsOpen = false;
+            }
+            string name = a_msg.GetProperty("name").GetString();
+            var buttons = new System.Collections.Generic.List<(string Name, Rect Bounds)>();
+            foreach (JsonElement b in a_msg.GetProperty("buttons").EnumerateArray())
+            {
+                double left = b.GetProperty("left").GetDouble();
+                double top = b.GetProperty("top").GetDouble();
+                buttons.Add((b.GetProperty("name").GetString(),
+                    new Rect(left, top, b.GetProperty("right").GetDouble() - left, b.GetProperty("bottom").GetDouble() - top)));
+            }
+            // 枠の外側の影の余白の分、左上へずらして、枠が指定の位置に来るようにする
+            var menu = new System.Windows.Controls.ContextMenu
+            {
+                Style = (Style)WebMenuStyles["WebMenu"],
+                PlacementTarget = m_webView,
+                Placement = System.Windows.Controls.Primitives.PlacementMode.Relative,
+                HorizontalOffset = a_msg.GetProperty("x").GetDouble() - WEB_MENU_SHADOW,
+                VerticalOffset = a_msg.GetProperty("y").GetDouble() - WEB_MENU_SHADOW,
+            };
+            foreach (JsonElement item in a_msg.GetProperty("items").EnumerateArray())
+            {
+                menu.Items.Add(BuildWebMenuItem(item));
+            }
+            // 切り替え先のメニュー（閉じた後に menuSwitch で知らせる）
+            string switchTo = null;
+            bool switchByKeyboard = false;
+            void SwitchTo(string a_name, bool a_keyboard)
+            {
+                switchTo = a_name;
+                switchByKeyboard = a_keyboard;
+                menu.IsOpen = false;
+            }
+            // 別のメニューのボタンへマウスを移したら、そのメニューに切り替える
+            menu.PreviewMouseMove += (s, e) =>
+            {
+                Point p = e.GetPosition(m_webView);
+                foreach (var (buttonName, bounds) in buttons)
+                {
+                    if (buttonName != name && bounds.Contains(p))
+                    {
+                        SwitchTo(buttonName, false);
+                        return;
+                    }
+                }
+            };
+            // 左右の矢印キー：隣のメニューに切り替える（サブメニューの中・サブメニューを持つ項目での右は、サブメニューの操作）
+            menu.PreviewKeyDown += (s, e) =>
+            {
+                if ((System.Windows.Input.Key.Left != e.Key && System.Windows.Input.Key.Right != e.Key) || buttons.Count < 2)
+                {
+                    return;
+                }
+                if (System.Windows.Input.Keyboard.FocusedElement is System.Windows.Controls.MenuItem focused &&
+                    (!ReferenceEquals(System.Windows.Controls.ItemsControl.ItemsControlFromItemContainer(focused), menu) ||
+                     (System.Windows.Input.Key.Right == e.Key && focused.HasItems)))
+                {
+                    return;
+                }
+                int index = buttons.FindIndex(b => b.Name == name);
+                int next = (index + (System.Windows.Input.Key.Right == e.Key ? 1 : buttons.Count - 1)) % buttons.Count;
+                e.Handled = true;
+                SwitchTo(buttons[next].Name, true);
+            };
+            bool byKeyboard = a_msg.TryGetProperty("keyboard", out JsonElement keyboard) && keyboard.GetBoolean();
+            if (byKeyboard)
+            {
+                // キーボードで開いた時は、最初の項目を選んだ状態にする（Windows のメニューと同じ）
+                menu.Opened += (s, e) => Dispatcher.BeginInvoke(new Action(() =>
+                    menu.MoveFocus(new System.Windows.Input.TraversalRequest(System.Windows.Input.FocusNavigationDirection.First))));
+            }
+            menu.Closed += (s, e) =>
+            {
+                if (ReferenceEquals(m_webMenu, menu))
+                {
+                    m_webMenu = null;
+                }
+                // キーボードの入力先を WebView2 に戻す（別のメニューに切り替える場合は、ShowWebMenu で再び移す。
+                // 「検索と置換」のようにメニューを持たないボタンへ切り替える場合は、画面側でそのボタンを選んだ状態にする）
+                m_webView.Focus();
+                Post(new { cmd = "menuClosed", name });
+                if (null != switchTo)
+                {
+                    Post(new { cmd = "menuSwitch", name = switchTo, keyboard = switchByKeyboard });
+                }
+            };
+            m_webMenu = menu;
+            // キーボードの入力先を、WebView2（ブラウザのウィンドウ）からこのウィンドウの見えない要素に移してから開く
+            // （WPF のメニューのキーボード操作は、このウィンドウに届いたキーで動くため。移さないと、矢印キー等が WebView2 に
+            // 届いて、メニューの項目間を移動できない）。閉じたら WebView2 に戻す（menu.Closed）
+            System.Windows.Input.Keyboard.Focus(m_focusSink);
+            menu.IsOpen = true;
+        }
+
+        /// <summary>メニューバーのメニューの項目を作る（ShowWebMenu）。</summary>
+        /// <param name="a_item">項目（null：区切り線。label・key（ショートカットの表示）・checked・disabled・title（説明）・
+        /// heading（選べない見出し）・submenu（サブメニューの項目）・id（選ばれた時に返す番号））。</param>
+        /// <returns>項目（MenuItem か Separator）。</returns>
+        private object BuildWebMenuItem(JsonElement a_item)
+        {
+            if (JsonValueKind.Null == a_item.ValueKind)
+            {
+                return new System.Windows.Controls.Separator { Style = (Style)WebMenuStyles["WebMenuSeparator"] };
+            }
+            string text = a_item.GetProperty("label").GetString();
+            if (a_item.TryGetProperty("heading", out JsonElement heading) && heading.GetBoolean())
+            {
+                // 選べない見出し（下の項目のまとまりの名前）
+                return new System.Windows.Controls.MenuItem { Header = text, Style = (Style)WebMenuStyles["WebMenuHeading"] };
+            }
+            // 「_」はアクセスキーの印になるので、「__」にして文字のまま表示する
+            var menuItem = new System.Windows.Controls.MenuItem
+            {
+                Header = text.Replace("_", "__"),
+                Style = (Style)WebMenuStyles["WebMenuItem"],
+            };
+            if (a_item.TryGetProperty("key", out JsonElement key))
+            {
+                menuItem.InputGestureText = key.GetString();
+            }
+            menuItem.IsChecked = a_item.TryGetProperty("checked", out JsonElement isChecked) && isChecked.GetBoolean();
+            menuItem.IsEnabled = !(a_item.TryGetProperty("disabled", out JsonElement disabled) && disabled.GetBoolean());
+            if (a_item.TryGetProperty("title", out JsonElement title))
+            {
+                menuItem.ToolTip = title.GetString();
+            }
+            if (a_item.TryGetProperty("submenu", out JsonElement submenu))
+            {
+                foreach (JsonElement child in submenu.EnumerateArray())
+                {
+                    menuItem.Items.Add(BuildWebMenuItem(child));
+                }
+            }
+            else if (a_item.TryGetProperty("id", out JsonElement id))
+            {
+                int itemId = id.GetInt32();
+                menuItem.Click += (s, e) => Post(new { cmd = "menuSelected", id = itemId });
+            }
+            return menuItem;
+        }
+
 
         /// <summary>右クリックのメニュー「表を挿入…」：行数・列数を指定するダイアログ（mde と同じ）を出し、結果を HTML 側に
         /// tableSize で知らせる（表は HTML 側で、右クリックした段落の後ろに挿入する）。</summary>

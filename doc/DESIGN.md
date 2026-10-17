@@ -20,6 +20,8 @@ mde の画面を HTML で作り直したアプリケーションです。この�
   - `dialog\PdfMarginDialog.xaml`：PDF の余白の設定（mde から移植）
   - `dialog\TableSizeDialog.xaml`：右クリックの「表を挿入…」の行数・列数の指定（mde から移植）
   - `dialog\LinkInputDialog.xaml`：右クリックの「リンクにする…」の URL の入力（mde から移植）
+  - `WebMenu.xaml`：メニューバーのメニュー（WPF のメニューで開く。Program.cs の ShowWebMenu）の見た目。
+    右クリックのメニュー（HTML）とそろえてある
   - `images\mde.ico` / `images\mde.png`：アプリのアイコン（mde と同じもの）
   - `web\`：画面側。ビルドは不要で、ここのファイルがそのまま実行フォルダへコピーされます。
   - `index.html` / `app.css`：画面の構成と見た目

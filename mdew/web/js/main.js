@@ -11,7 +11,8 @@
 //                {cmd:'openRecent', path, newWindow} / {cmd:'clearRecent'} / {cmd:'openRecentFolder', path, relPath, newWindow} /
 //                {cmd:'clearRecentFolders'} / {cmd:'close'} / {cmd:'openReadme'} /
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs} /
-//                {cmd:'tableSizeDialog'} / {cmd:'linkDialog'}
+//                {cmd:'tableSizeDialog'} / {cmd:'linkDialog'} /
+//                {cmd:'showMenu', name, x, y, items, buttons, keyboard}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
 //                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug, tempDir} /
@@ -19,7 +20,8 @@
 //                {cmd:'folderFiles', reqId, files:[{path, text}]} / {cmd:'savedAll', saved, failed:[{path, message}]} /
 //                {cmd:'findCommand', action, query, replacement, folder, matchCase, regex, index} /
 //                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls} /
-//                {cmd:'tableSize', rows, cols} / {cmd:'linkUrl', url}
+//                {cmd:'tableSize', rows, cols} / {cmd:'linkUrl', url} /
+//                {cmd:'menuSelected', id} / {cmd:'menuClosed', name} / {cmd:'menuSwitch', name, keyboard}
 import { Editor, showMenu, closeMenu } from './editor.js';
 import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
@@ -1420,6 +1422,21 @@ function showBarMenu(a_name, a_keyboard = false) {
   barMenuMode = false;
   const def = MENUS[a_name];
   const rect = def.button.getBoundingClientRect();
+  if (host) {
+    // ホストの WPF のメニューで開く（ウィンドウの外まで広がって表示できるように。長いパスの「最近使ったファイル」等も
+    // 省略せずに表示する。見た目は右クリックのメニューとそろえてある。Program.cs の ShowWebMenu・WebMenu.xaml）。
+    // メニューバーのボタンの名前と位置（並んでいる順）も送る（ホスト側で、メニューを開いている間に別のボタンへ
+    // マウスを移した時・左右の矢印キーを押した時に切り替えるため。「検索と置換」のようにメニューを持たないボタンも含める）
+    hostMenuItems = new Map();
+    const buttons = [...document.querySelectorAll('#menubar > button')].map((b) => {
+      const r = b.getBoundingClientRect();
+      return { name: barButtonName(b), left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    });
+    send({ cmd: 'showMenu', name: a_name, x: rect.left, y: rect.bottom + 2, items: menuItemsForHost(def.items()), buttons, keyboard: a_keyboard });
+    openMenuName = a_name;
+    def.button.classList.add('menu-open');
+    return;
+  }
   showMenu(rect.left, rect.bottom + 2, def.items(), (a_item) => (a_item.run ? a_item.run() : commands[a_item.cmd]()),
     { keyboard: a_keyboard, onNavigate: (a_dir) => navigateBar(def.button, a_dir) });
   openMenuName = a_name;
@@ -1435,6 +1452,30 @@ function showBarMenu(a_name, a_keyboard = false) {
       a_observer.disconnect();
     }
   }).observe(document.body, { childList: true });
+}
+
+/** ホストに開いてもらったメニューの項目（番号 → 項目。選ばれた時に menuSelected で番号が届く）。 */
+let hostMenuItems = new Map();
+
+/**
+ * メニューの項目を、ホストに送る形にする（選べる項目には番号を付けて、hostMenuItems に覚えておく）。
+ * @param {(object|null)[]} a_items 項目（editor.js の showMenu と同じ形。null は区切り線）
+ * @returns {(object|null)[]}
+ */
+function menuItemsForHost(a_items) {
+  return a_items.map((item) => {
+    if (!item) return null;
+    if (item.heading) return { label: item.label, heading: true };
+    const out = { label: item.label, key: item.key || '', checked: !!item.checked, disabled: !!item.disabled };
+    if (item.title && item.title !== item.label) out.title = item.title;
+    if (item.submenu) {
+      out.submenu = menuItemsForHost(item.submenu);
+    } else {
+      out.id = hostMenuItems.size + 1;
+      hostMenuItems.set(out.id, item);
+    }
+    return out;
+  });
 }
 
 /**
@@ -1700,6 +1741,30 @@ if (host) {
       // 最近使ったファイル・フォルダの一覧（開いた・保存した時、ウィンドウが手前に来た時に届く）
       state.recentFiles = msg.files || [];
       state.recentFolders = msg.folders || [];
+    } else if ('menuSelected' === msg.cmd) {
+      // メニューバーのメニュー（ホストの WPF のメニュー）で項目が選ばれた
+      const item = hostMenuItems.get(msg.id);
+      if (item) {
+        if (item.run) item.run();
+        else commands[item.cmd]();
+      }
+    } else if ('menuClosed' === msg.cmd) {
+      // メニューバーのメニューが閉じた（項目を選んだ・外をクリックした・Esc）
+      MENUS[msg.name]?.button.classList.remove('menu-open');
+      if (openMenuName === msg.name) openMenuName = null;
+    } else if ('menuSwitch' === msg.cmd) {
+      // メニューを開いている間に、別のボタンへマウスを移した・左右の矢印キーを押した
+      const button = [...document.querySelectorAll('#menubar > button')].find((b) => barButtonName(b) === msg.name);
+      if (MENUS[msg.name]) {
+        showBarMenu(msg.name, !!msg.keyboard);
+      } else if (button && msg.keyboard) {
+        // 矢印キーで「検索と置換」へ移った：そのボタンを選んだ状態にする（Enter で実行）
+        button.classList.add('menu-open');
+        button.focus();
+      } else {
+        // マウスを「検索と置換」へ移した：メニューは閉じたまま、メニューのボタンへマウスを戻したら開く
+        barMenuMode = true;
+      }
     } else if ('tableSize' === msg.cmd) {
       // 右クリックの「表を挿入…」のダイアログを閉じた（行数・列数が 0 なら取りやめ）
       const anchor = tableAnchor;
