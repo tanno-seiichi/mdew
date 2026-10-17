@@ -82,6 +82,12 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 
 ## 対応済み
 
+- [x] **使っていない WebView2 の WinForms 用の DLL を、実行フォルダ・インストーラーから外す**（2026-10-18）
+  - WebView2 のパッケージは WPF 用・WinForms 用の DLL をどちらも参照に加えるので、使っていない
+    Microsoft.Web.WebView2.WinForms.dll も実行フォルダにコピーされ、mdew.deps.json にも載っていた。
+    mdew.csproj の RemoveWebView2WinForms で参照から外し（コピー・mdew.deps.json からも消える）、msi\File.wxs・
+    msi\THIRD-PARTY-NOTICES.txt からも外した
+
 - [x] **.NET 8 のサポート終了（2026-11-10）への対応：.NET 10（LTS。2028 年 11 月までサポート）へ移行**（2026-10-18）
   - csproj の TargetFramework を `net8.0-windows` から `net10.0-windows` にした。実行には .NET 10 Desktop Runtime が必要
     （README も直した）。インストーラーは、mdew の出力先（`bin\Release\net10.0-windows`）を参照で見つけるので変更なし

@@ -9,7 +9,7 @@ Microsoft.Web.WebView2 (WebView2 SDK)  version 1.0.2903.40
 https://www.nuget.org/packages/Microsoft.Web.WebView2
 ------------------------------------------------------------------------
 Files: Microsoft.Web.WebView2.Core.dll, Microsoft.Web.WebView2.Wpf.dll,
-       Microsoft.Web.WebView2.WinForms.dll, runtimes\*\native\WebView2Loader.dll
+       WebView2Loader.dll (x64)
 ========================================================================
 
 [LICENSE.txt]

@@ -10,10 +10,10 @@
 
 		<!-- WebView2（NuGetパッケージ Microsoft.Web.WebView2）のライブラリ。mdew.csprojの
 		     PackageReferenceのバージョンを更新した時も、ファイル構成が変わっていないか確認する。
-		     .xml（IntelliSense用のドキュメント）はビルド出力にあるが実行には不要なので同梱しない。 -->
+		     .xml（IntelliSense用のドキュメント）はビルド出力にあるが実行には不要なので同梱しない。
+		     WinForms用のDLL（Microsoft.Web.WebView2.WinForms.dll）は使わないので、mdew.csprojでビルド出力から外している。 -->
 		<Component Id="Microsoft.Web.WebView2.Core.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="Microsoft.Web.WebView2.Core.dll" KeyPath="yes" /></Component>
 		<Component Id="Microsoft.Web.WebView2.Wpf.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="Microsoft.Web.WebView2.Wpf.dll" KeyPath="yes" /></Component>
-		<Component Id="Microsoft.Web.WebView2.WinForms.dll.Component" Directory="INSTALLFOLDER" Guid="*"><File Source="Microsoft.Web.WebView2.WinForms.dll" KeyPath="yes" /></Component>
 
 		<!-- WebView2Loader.dll（ネイティブDLL、x64用）。mdew.csprojでRuntimeIdentifierをwin-x64に
 		     しているので、ビルド出力の直下（mdew.exeと同じ場所）にx64用だけがコピーされる。 -->

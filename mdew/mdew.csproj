@@ -43,6 +43,17 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
   </ItemGroup>
 
+  <!-- WebView2 の WinForms 用の DLL（Microsoft.Web.WebView2.WinForms.dll）は使わないので、参照・実行フォルダへのコピー・
+       mdew.deps.json から外す。WebView2 のパッケージは、WPF 用・WinForms 用の DLL をどちらも参照に加えるため、
+       使っていなくても実行フォルダにコピーされ、mdew.deps.json（起動時に .NET が読む依存関係の一覧）にも載る。
+       mdew.deps.json に載ったままファイルだけ無いと起動できなくなるので、インストーラーで外すだけでは足りない -->
+  <Target Name="RemoveWebView2WinForms" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <ReferencePath Remove="@(ReferencePath)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.WinForms'" />
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.WinForms'" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <!-- 画面側（HTML・JavaScript・CSS）は、ビルドせずにそのまま実行フォルダの web へコピーする -->
     <Content Include="web\**" CopyToOutputDirectory="PreserveNewest" />
