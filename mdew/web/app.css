@@ -68,6 +68,10 @@ body.no-outline #outline { display: none; } /* メニュー「表示」→「ア
 /* メニュー「表示」→「本文の幅」→「編集ペインの幅に合わせる」（main.js の setFullWidth）：最大 884px の制限をなくし、
    左右の余白 30px を除いた編集ペインの幅いっぱいに表示する */
 body.full-width #doc { padding-left: 30px; padding-right: 30px; }
+/* 同じく、表は編集ペインの幅（余白を除く）に収める：セルの中の長い URL・パス等の区切りの無い文字も途中で折り返す
+   （折り返さないと、ウィンドウを狭くした時に表が右へはみ出す）。セルの最小幅（3em）もなくす
+   （列の多い表は、最小幅 × 列数が編集ペインの幅を超えて、はみ出すため。列の幅は中身に合わせて決まり、収まらない時だけ細くなる） */
+body.full-width #doc :is(th, td) { overflow-wrap: anywhere; min-width: 0; }
 /* 文書の見た目は、PDF に書き出す時の印刷用の文書（#print-doc）にも使う */
 :is(#doc, #print-doc) {
   font-family: var(--doc-font); font-size: var(--doc-font-size); line-height: var(--doc-line-height); outline: none;
