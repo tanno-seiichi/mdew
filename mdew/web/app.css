@@ -132,6 +132,52 @@ body.full-width #doc :is(th, td) { overflow-wrap: anywhere; min-width: 0; }
 :is(#doc, #print-doc) a { color: #0b62c4; text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
 :is(#doc, #print-doc) mark { background: #fff3a3; }
 
+/* ===== VSCodeスタイル（メニュー「表示」→「表示スタイル」→「VSCodeスタイル」。main.js の setDocStyle） =====
+   Visual Studio Code の Markdown のプレビュー（ライトテーマ）に似せた見た目。上の GitHubスタイルの値を、
+   body.style-vscode の時だけ上書きする。文字は Segoe UI（日本語は Yu Gothic UI）の 14px、黒。
+   見出しは少し太い字（600）で、大見出し・中見出しの下に淡い灰色の線。箇条書きは項目の間を空けない。
+   リンクは下線なしの青、コードは赤い字に淡い灰色の背景。表は縦の線が無く、行の間に淡い灰色の線 */
+body.style-vscode {
+  --doc-font: 'Segoe WPC', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
+  --doc-font-size: 14px;
+  --doc-line-height: 1.7;
+  --list-line-height: 1.6;
+  --list-item-gap: 0px;
+  --code-font: Consolas, 'Courier New', 'Yu Gothic UI', monospace;
+  --code-font-size: 1em;
+  --code-block-font-size: 14px;
+  --code-block-line-height: 1.357;
+  --vscode-separator: #d1d1d1; /* 見出しの下・表・横線の色（黒の 18%） */
+}
+body.style-vscode :is(#doc, #print-doc) { color: #000000; }
+body.style-vscode :is(#doc, #print-doc) p { margin: 0 0 0.9em; }
+body.style-vscode :is(#doc, #print-doc) :is(h1, h2, h3, h4, h5, h6) { line-height: 1.25; margin: 24px 0 16px; font-weight: 600; }
+body.style-vscode :is(#doc, #print-doc) h1 { font-size: 2em; border-bottom: 1px solid var(--vscode-separator); padding-bottom: 0.3em; }
+body.style-vscode :is(#doc, #print-doc) h2 { font-size: 1.5em; border-bottom: 1px solid var(--vscode-separator); padding-bottom: 0.3em; }
+body.style-vscode :is(#doc, #print-doc) h3 { font-size: 1.25em; }
+body.style-vscode :is(#doc, #print-doc) h4 { font-size: 1em; }
+body.style-vscode :is(#doc, #print-doc) h5 { font-size: 0.875em; }
+body.style-vscode :is(#doc, #print-doc) h6 { font-size: 0.85em; }
+body.style-vscode :is(#doc, #print-doc) :is(ul, ol) { margin: 0 0 0.9em; padding-left: 2em; }
+body.style-vscode :is(#doc, #print-doc) :is(strong, b) { font-weight: 600; }
+body.style-vscode :is(#doc, #print-doc) a { color: #006ab1; text-decoration: none; }
+body.style-vscode :is(#doc, #print-doc) a:hover { text-decoration: underline; }
+body.style-vscode :is(#doc, #print-doc) code {
+  color: #a31515; background: rgba(0, 0, 0, 0.1); border: none; border-radius: 3px; padding: 1px 3px;
+}
+body.style-vscode :is(#doc, #print-doc) pre {
+  color: #000000; background: rgba(220, 220, 220, 0.4); border: none; border-radius: 3px; padding: 16px; margin: 0 0 0.9em;
+}
+body.style-vscode :is(#doc, #print-doc) pre code { color: inherit; background: none; padding: 0; }
+body.style-vscode :is(#doc, #print-doc) blockquote {
+  margin: 0 7px 0.9em 5px; padding: 0 16px 0 10px; color: inherit;
+  background: rgba(127, 127, 127, 0.1); border-left: 5px solid rgba(0, 122, 204, 0.5);
+}
+body.style-vscode :is(#doc, #print-doc) hr { border: none; border-top: 1px solid var(--vscode-separator); margin: 1.2em 0; }
+body.style-vscode :is(#doc, #print-doc) :is(th, td) { border: none; padding: 5px 10px; }
+body.style-vscode :is(#doc, #print-doc) th { background: none; text-align: left; border-bottom: 1px solid #000000; } /* 見出しの行の下だけ黒い線 */
+body.style-vscode :is(#doc, #print-doc) tr + tr > td { border-top: 1px solid var(--vscode-separator); }
+
 #statusbar {
   /* 文字は高さ方向の中央に（Yu Gothic UI は文字が少し下に寄って見えるため、上の余白を 1px 減らして下に回す）。左の余白は狭く */
   display: flex; align-items: center; gap: 16px; padding: 2px 10px 4px 4px; border-top: 1px solid var(--line);

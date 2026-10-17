@@ -1197,6 +1197,8 @@ const commands = {
   softBreakJoin: () => setSoftBreakMode(true),
   docWidthLimited: () => setFullWidth(false),
   docWidthFull: () => setFullWidth(true),
+  docStyleGithub: () => setDocStyle('github'),
+  docStyleVscode: () => setDocStyle('vscode'),
   toggleSource: () => setSourceMode(!state.sourceMode),
   zoomIn: () => setZoom(zoomLevel + ZOOM_STEP),
   zoomOut: () => setZoom(zoomLevel - ZOOM_STEP),
@@ -1334,6 +1336,37 @@ try {
   // 読み込めなければ既定（読みやすい幅）のまま
 }
 
+// ---- 表示スタイル（GitHubスタイルか、VSCodeスタイルか。次回起動時も同じにする）-----------------------
+/** localStorage に保存するキー（値は 'github' か 'vscode'）。 */
+const DOC_STYLE_KEY = 'docStyle';
+/** 今の表示スタイル（'github'（既定）か 'vscode'）。 */
+let docStyle = 'github';
+
+/**
+ * 文書の見た目を切り替える（app.css の body.style-vscode）。GitHubスタイルは今までの見た目、VSCodeスタイルは
+ * Visual Studio Code の Markdown のプレビューに似せた見た目。ソースモード・PDF への書き出しも同じ見た目になる。
+ * 文字の大きさ・行の間隔が変わるので、文書の中の今見ている位置（割合）は保つ。
+ * @param {string} a_style 'github' か 'vscode'
+ */
+function setDocStyle(a_style) {
+  const wrap = $('editor-wrap');
+  const ratio = wrap.scrollHeight > wrap.clientHeight ? wrap.scrollTop / (wrap.scrollHeight - wrap.clientHeight) : 0;
+  docStyle = 'vscode' === a_style ? 'vscode' : 'github';
+  document.body.classList.toggle('style-vscode', 'vscode' === docStyle);
+  if (wrap.scrollHeight > wrap.clientHeight) wrap.scrollTop = ratio * (wrap.scrollHeight - wrap.clientHeight);
+  try {
+    localStorage.setItem(DOC_STYLE_KEY, docStyle);
+  } catch {
+    // 保存できなくても動作には影響しない（次回は既定の GitHubスタイルになるだけ）
+  }
+}
+// 前回の表示スタイルを復元する
+try {
+  if ('vscode' === localStorage.getItem(DOC_STYLE_KEY)) setDocStyle('vscode');
+} catch {
+  // 読み込めなければ既定（GitHubスタイル）のまま
+}
+
 // ---- 表示倍率（mde のステータスバーの「－」「100%」「＋」と同じ。次回起動時も同じにする）----------
 /** localStorage に保存するキー（値は倍率。1 が 100%）。 */
 const ZOOM_KEY = 'zoom';
@@ -1454,6 +1487,10 @@ const MENUS = {
       { label: '本文の幅', heading: true },
       { label: '読みやすい幅にする（最大 884px）', checked: !fullWidth, cmd: 'docWidthLimited' },
       { label: '編集ペインの幅に合わせる', checked: fullWidth, cmd: 'docWidthFull' },
+      null,
+      { label: '表示スタイル', heading: true },
+      { label: 'GitHubスタイル', checked: 'github' === docStyle, cmd: 'docStyleGithub' },
+      { label: 'VSCodeスタイル', checked: 'vscode' === docStyle, cmd: 'docStyleVscode' },
     ],
   },
   help: {
