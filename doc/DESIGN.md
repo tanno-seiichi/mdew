@@ -51,7 +51,7 @@ Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js �
 
 構成を Release にしてソリューションをビルドすると、インストーラーも作られます
 （`msi\bin\x64\Release\ja-JP\mdew.msi` と `en-US\mdew.msi`）。インストーラーには mdew の実行フォルダ
-（`mdew\bin\Release\net8.0-windows`）のファイルが入るので、先に mdew のビルドが通っている必要があります
+（`mdew\bin\Release\net10.0-windows`）のファイルが入るので、先に mdew のビルドが通っている必要があります
 （ソリューションのビルドでは、プロジェクトの参照により mdew が先にビルドされます）。
 
 ## 今できること（成立確認の範囲）

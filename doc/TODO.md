@@ -59,9 +59,8 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 
 ### 配布
 
-- [ ] .NET 8 のサポート終了（2026-11-10）への対応：.NET 10（LTS）へ移行する（csproj の `net8.0-windows` →
-      `net10.0-windows`）。あわせて WebView2 SDK を新しい版に更新するか検討する（今は 1.0.2903.40。
-      更新したら msi\THIRD-PARTY-NOTICES.txt のバージョン・ライセンス文と msi\File.wxs も直す）
+- [ ] WebView2 SDK を新しい版に更新するか検討する（今は 1.0.2903.40。更新したら msi\THIRD-PARTY-NOTICES.txt の
+      バージョン・ライセンス文と msi\File.wxs も直す）
 
 ## 様子を見て検討するもの
 
@@ -82,6 +81,10 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 - [ ] 置換（すべて置換・1件ずつ置換）と「すべて保存」を、実際のファイルで確かめる（ブラウザの自動テストでは確認済み）
 
 ## 対応済み
+
+- [x] **.NET 8 のサポート終了（2026-11-10）への対応：.NET 10（LTS。2028 年 11 月までサポート）へ移行**（2026-10-18）
+  - csproj の TargetFramework を `net8.0-windows` から `net10.0-windows` にした。実行には .NET 10 Desktop Runtime が必要
+    （README も直した）。インストーラーは、mdew の出力先（`bin\Release\net10.0-windows`）を参照で見つけるので変更なし
 
 - [x] **表示スタイルの切り替え（GitHubスタイル・VSCodeスタイル）**（2026-10-18）
   - メニュー「表示」→「表示スタイル」で切り替える（main.js の setDocStyle、app.css の body.style-vscode。次回起動時も同じ）。
