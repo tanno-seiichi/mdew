@@ -20,7 +20,6 @@ mde の画面を HTML で作り直したアプリケーションです。この�
   - `dialog\PdfMarginDialog.xaml`：PDF の余白の設定（mde から移植）
   - `dialog\TableSizeDialog.xaml`：右クリックの「表を挿入…」の行数・列数の指定（mde から移植）
   - `dialog\LinkInputDialog.xaml`：右クリックの「リンクにする…」の URL の入力（mde から移植）
-  - `dialog\ConfirmDialog.xaml`：はい・いいえ・キャンセルの確認（Windows のメッセージボックスと同じ見た目。今は使っていない。閉じる時の確認は MessageBox.Show）
   - `app.manifest`：アプリのマニフェスト（コモンコントロール 6 を使う設定。メッセージボックスを今の Windows の見た目で表示する）
   - `WebMenu.xaml`：メニューバーのメニュー（WPF のメニューで開く。Program.cs の ShowWebMenu）の見た目。
     右クリックのメニュー（HTML）とそろえてある
