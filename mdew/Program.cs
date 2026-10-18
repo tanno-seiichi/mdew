@@ -777,6 +777,23 @@ namespace mdew
                 HorizontalOffset = a_msg.GetProperty("x").GetDouble() - WEB_MENU_SHADOW,
                 VerticalOffset = a_msg.GetProperty("y").GetDouble() - WEB_MENU_SHADOW,
             };
+            // 文字の色：画面側の文字の色（メニュー「表示」→「文字の色」。textColor）にそろえる。WebMenu.xaml の WebMenuText は
+            // DynamicResource なので、このメニュー（とサブメニュー）の中だけ置き換わる。渡されなければ既定の色
+            System.Windows.Media.Brush textBrush = (System.Windows.Media.Brush)WebMenuStyles["WebMenuText"];
+            if (a_msg.TryGetProperty("textColor", out JsonElement textColorElement) && JsonValueKind.String == textColorElement.ValueKind
+                && !string.IsNullOrWhiteSpace(textColorElement.GetString()))
+            {
+                try
+                {
+                    var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(textColorElement.GetString());
+                    textBrush = new System.Windows.Media.SolidColorBrush(color);
+                }
+                catch (Exception ex) when (ex is FormatException || ex is NotSupportedException || ex is NullReferenceException)
+                {
+                    // 色として読めなければ既定の色のまま
+                }
+            }
+            menu.Resources["WebMenuText"] = textBrush;
             foreach (JsonElement item in a_msg.GetProperty("items").EnumerateArray())
             {
                 menu.Items.Add(BuildWebMenuItem(item));

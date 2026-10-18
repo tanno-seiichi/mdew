@@ -10,7 +10,8 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <SolidColorBrush x:Key="WebMenuText" Color="#333333"/>
+    <!-- 文字の色（既定。メニューを開く時に、画面側の文字の色（メニュー「表示」→「文字の色」）で置き換える。Program.cs の ShowWebMenu） -->
+    <SolidColorBrush x:Key="WebMenuText" Color="#1C1C1C"/>
     <SolidColorBrush x:Key="WebMenuBorder" Color="#C8CCD1"/>
     <SolidColorBrush x:Key="WebMenuHighlight" Color="#E8F0FE"/>
     <SolidColorBrush x:Key="WebMenuCheck" Color="#0B62C4"/>
@@ -43,7 +44,7 @@
         <Setter Property="HasDropShadow" Value="False"/>
         <Setter Property="FontFamily" Value="{StaticResource WebMenuFont}"/>
         <Setter Property="FontSize" Value="13"/>
-        <Setter Property="Foreground" Value="{StaticResource WebMenuText}"/>
+        <Setter Property="Foreground" Value="{DynamicResource WebMenuText}"/>
         <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -134,7 +135,7 @@
 
     <Style x:Key="WebMenuItem" TargetType="MenuItem">
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-        <Setter Property="Foreground" Value="{StaticResource WebMenuText}"/>
+        <Setter Property="Foreground" Value="{DynamicResource WebMenuText}"/>
         <Setter Property="Template" Value="{StaticResource WebMenuItemTemplate}"/>
         <Style.Triggers>
             <Trigger Property="Role" Value="SubmenuHeader">

@@ -12,7 +12,7 @@
 //                {cmd:'clearRecentFolders'} / {cmd:'close'} / {cmd:'openReadme'} /
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs} /
 //                {cmd:'tableSizeDialog'} / {cmd:'linkDialog'} /
-//                {cmd:'showMenu', name, x, y, items, buttons, keyboard} /
+//                {cmd:'showMenu', name, x, y, items, buttons, keyboard, textColor} /
 //                {cmd:'confirmClose', files:[{path, markdown, images, current}]}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
@@ -1199,6 +1199,8 @@ const commands = {
   docWidthFull: () => setFullWidth(true),
   docStyleGithub: () => setDocStyle('github'),
   docStyleVscode: () => setDocStyle('vscode'),
+  textColorSharp: () => setTextColor('sharp'),
+  textColorSoft: () => setTextColor('soft'),
   toggleSource: () => setSourceMode(!state.sourceMode),
   zoomIn: () => setZoom(zoomLevel + ZOOM_STEP),
   zoomOut: () => setZoom(zoomLevel - ZOOM_STEP),
@@ -1367,6 +1369,34 @@ try {
   // 読み込めなければ既定（GitHubスタイル）のまま
 }
 
+// ---- 文字の色（くっきりした色か、目にやさしい色か。次回起動時も同じにする）---------------------------
+/** localStorage に保存するキー（値は 'sharp' か 'soft'）。 */
+const TEXT_COLOR_KEY = 'textColor';
+/** 今の文字の色（'sharp'（既定）：くっきりした色、'soft'：目にやさしい色）。 */
+let textColor = 'sharp';
+
+/**
+ * 文字の色を切り替える（app.css の body.text-soft）。くっきりした色はほぼ黒（#1c1c1c）、目にやさしい色は少し薄い
+ * 灰色（#333333）。本文・ソースモード・メニュー・ステータスバー等の文字の色がまとめて変わる。メニューバーの
+ * メニュー（ホスト側）は、開く時に今の色を渡す（showBarMenu の textColor）。
+ * @param {string} a_color 'sharp' か 'soft'
+ */
+function setTextColor(a_color) {
+  textColor = 'soft' === a_color ? 'soft' : 'sharp';
+  document.body.classList.toggle('text-soft', 'soft' === textColor);
+  try {
+    localStorage.setItem(TEXT_COLOR_KEY, textColor);
+  } catch {
+    // 保存できなくても動作には影響しない（次回は既定のくっきりした色になるだけ）
+  }
+}
+// 前回の文字の色を復元する
+try {
+  if ('soft' === localStorage.getItem(TEXT_COLOR_KEY)) setTextColor('soft');
+} catch {
+  // 読み込めなければ既定（くっきりした色）のまま
+}
+
 // ---- 表示倍率（mde のステータスバーの「－」「100%」「＋」と同じ。次回起動時も同じにする）----------
 /** localStorage に保存するキー（値は倍率。1 が 100%）。 */
 const ZOOM_KEY = 'zoom';
@@ -1488,6 +1518,10 @@ const MENUS = {
       { label: '読みやすい幅にする（最大 884px）', checked: !fullWidth, cmd: 'docWidthLimited' },
       { label: '編集ペインの幅に合わせる', checked: fullWidth, cmd: 'docWidthFull' },
       null,
+      { label: '文字の色', heading: true },
+      { label: 'くっきりした色', checked: 'sharp' === textColor, cmd: 'textColorSharp' },
+      { label: '目にやさしい色', checked: 'soft' === textColor, cmd: 'textColorSoft' },
+      null,
       { label: '表示スタイル', heading: true },
       { label: 'GitHubスタイル', checked: 'github' === docStyle, cmd: 'docStyleGithub' },
       { label: 'VSCodeスタイル', checked: 'vscode' === docStyle, cmd: 'docStyleVscode' },
@@ -1528,7 +1562,10 @@ function showBarMenu(a_name, a_keyboard = false) {
       const r = b.getBoundingClientRect();
       return { name: barButtonName(b), left: r.left, top: r.top, right: r.right, bottom: r.bottom };
     });
-    send({ cmd: 'showMenu', name: a_name, x: rect.left, y: rect.bottom + 2, items: menuItemsForHost(def.items()), buttons, keyboard: a_keyboard });
+    // textColor：メニューの文字の色を、画面の文字の色（メニュー「表示」→「文字の色」）にそろえる
+    const textColorValue = getComputedStyle(document.body).getPropertyValue('--text').trim();
+    send({ cmd: 'showMenu', name: a_name, x: rect.left, y: rect.bottom + 2, items: menuItemsForHost(def.items()), buttons,
+      keyboard: a_keyboard, textColor: textColorValue });
     openMenuName = a_name;
     def.button.classList.add('menu-open');
     return;

@@ -19,12 +19,16 @@
   --code-bg: #f8f8f8;
   --code-block-bg: #f8f8f8;
   --code-border: #ccd0d4;
-  --text: #333333; /* 文字の色（本文・メニュー・ステータスバー等。真っ黒より少し薄くして、線が太く見えないようにする） */
+  /* 文字の色（本文・メニュー・ステータスバー等）。メニュー「表示」→「文字の色」で切り替える（main.js の setTextColor）：
+     「くっきりした色」（既定）はほぼ黒、「目にやさしい色」（body.text-soft）は少し薄い灰色（線が細く見える） */
+  --text: #1c1c1c;
+  --vscode-text: #000000; /* VSCodeスタイルの本文の色 */
   --selection-bg: #c8d6e8; /* 範囲選択の色 */
 }
 
 html, body { height: 100%; margin: 0; }
 body { font-family: var(--ui-font); background: #ffffff; color: var(--text); }
+body.text-soft { --text: #333333; --vscode-text: #333333; --link: #4183c4; } /* 「目にやさしい色」（リンクも少し薄い青） */
 #app { display: flex; flex-direction: column; height: 100vh; }
 
 /* メニューバー：背景は白・枠線なし・文字は 12px（9pt）・項目の間の余白は狭く */
@@ -129,7 +133,7 @@ body.full-width #doc :is(th, td) { overflow-wrap: anywhere; min-width: 0; }
 :is(#doc, #print-doc) th, :is(#doc, #print-doc) td { border: 1px solid #c8ccd1; padding: 4px 10px; min-width: 3em; vertical-align: top; }
 :is(#doc, #print-doc) th { background: #f8f8f8; }
 :is(#doc, #print-doc) img { max-width: 100%; vertical-align: bottom; }
-:is(#doc, #print-doc) a { color: #0b62c4; text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
+:is(#doc, #print-doc) a { color: var(--link, #0b62c4); text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
 :is(#doc, #print-doc) mark { background: #fff3a3; }
 
 /* ===== VSCodeスタイル（メニュー「表示」→「表示スタイル」→「VSCodeスタイル」。main.js の setDocStyle） =====
@@ -149,7 +153,7 @@ body.style-vscode {
   --code-block-line-height: 1.357;
   --vscode-separator: #d1d1d1; /* 見出しの下・表・横線の色（黒の 18%） */
 }
-body.style-vscode :is(#doc, #print-doc) { color: #000000; }
+body.style-vscode :is(#doc, #print-doc) { color: var(--vscode-text); }
 body.style-vscode :is(#doc, #print-doc) p { margin: 0 0 0.9em; }
 body.style-vscode :is(#doc, #print-doc) :is(h1, h2, h3, h4, h5, h6) { line-height: 1.25; margin: 24px 0 16px; font-weight: 600; }
 body.style-vscode :is(#doc, #print-doc) h1 { font-size: 2em; border-bottom: 1px solid var(--vscode-separator); padding-bottom: 0.3em; }
@@ -166,7 +170,7 @@ body.style-vscode :is(#doc, #print-doc) code {
   color: #a31515; background: rgba(0, 0, 0, 0.1); border: none; border-radius: 3px; padding: 1px 3px;
 }
 body.style-vscode :is(#doc, #print-doc) pre {
-  color: #000000; background: rgba(220, 220, 220, 0.4); border: none; border-radius: 3px; padding: 16px; margin: 0 0 0.9em;
+  color: var(--vscode-text); background: rgba(220, 220, 220, 0.4); border: none; border-radius: 3px; padding: 16px; margin: 0 0 0.9em;
 }
 body.style-vscode :is(#doc, #print-doc) pre code { color: inherit; background: none; padding: 0; }
 body.style-vscode :is(#doc, #print-doc) blockquote {
@@ -195,7 +199,7 @@ body.no-statusbar #statusbar { display: none; } /* メニュー「表示」→�
 body.folder-open #status-folder { display: inline-block; }
 #status-dirty { color: #c0392b; min-width: 4em; }
 #status-host { margin-left: auto; }
-#status-link { color: #0b62c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#status-link { color: var(--link, #0b62c4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* Debug ビルドの時だけ表示する部分（停止・入力遅延の回数。ホストから init で debug が届くと body に debug を付ける） */
 .debug-only { display: none; }
 body.debug .debug-only { display: inline; }
@@ -223,8 +227,8 @@ body.source-mode #editor-wrap { overflow: hidden; }
 #source-backdrop { background: #f0f0f0; color: transparent; pointer-events: none; }
 #source-backdrop mark { color: transparent; background: #ffe166; }
 #source-backdrop mark.current { background: #ffa54d; }
-#source { background: transparent; color: var(--text); resize: none; outline: none; }
-body.style-vscode #source { color: #000000; } /* VSCodeスタイルは本文と同じく黒 */
+#source { background: transparent; color: #000000; resize: none; outline: none; }
+body.text-soft #source { color: var(--text); } /* 「目にやさしい色」 */
 body.full-width :is(#source, #source-backdrop) { --source-side: calc(30px * var(--zoom, 1)); }
 
 /* フォルダビュー（「フォルダを開く...」で開いた時だけ表示。行の色は mde と同じ） */
