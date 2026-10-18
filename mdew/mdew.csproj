@@ -17,7 +17,7 @@
     <Copyright>Copyright © 2026 tanno-seiichi</Copyright>
     <!-- アプリのバージョン（タイトルバーに表示する。Program.Version 参照）。
          4桁で書くと、ファイルバージョンと製品バージョンが同じ表示（0.0.1.0）になる -->
-    <Version>0.0.14.0</Version>
+    <Version>0.0.15.0</Version>
     <!-- バージョンの表示に、ソース管理のリビジョン（+xxxx）を付けない -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- アプリのアイコン -->
