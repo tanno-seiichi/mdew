@@ -16,9 +16,9 @@
   --code-block-line-height: 1.5;
   --line: #dddfe2;
   --pane-bg: #f6f7f9;
-  --code-bg: #f3f4f4;
-  --code-block-bg: #f3f4f4;
-  --code-border: #e7eaed;
+  --code-bg: #f8f8f8;
+  --code-block-bg: #f8f8f8;
+  --code-border: #ccd0d4;
   --text: #1c1c1c;
   --selection-bg: #c8d6e8; /* 範囲選択の色 */
 }
@@ -127,7 +127,7 @@ body.full-width #doc :is(th, td) { overflow-wrap: anywhere; min-width: 0; }
 }
 :is(#doc, #print-doc) table { border-collapse: collapse; margin: 0 0 0.8em; }
 :is(#doc, #print-doc) th, :is(#doc, #print-doc) td { border: 1px solid #c8ccd1; padding: 4px 10px; min-width: 3em; vertical-align: top; }
-:is(#doc, #print-doc) th { background: #f1f3f5; }
+:is(#doc, #print-doc) th { background: #f8f8f8; }
 :is(#doc, #print-doc) img { max-width: 100%; vertical-align: bottom; }
 :is(#doc, #print-doc) a { color: #0b62c4; text-decoration: underline; cursor: pointer; } /* リンクはクリックで開く */
 :is(#doc, #print-doc) mark { background: #fff3a3; }
