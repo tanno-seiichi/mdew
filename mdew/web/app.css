@@ -19,7 +19,7 @@
   --code-bg: #f8f8f8;
   --code-block-bg: #f8f8f8;
   --code-border: #ccd0d4;
-  --text: #1c1c1c;
+  --text: #333333; /* 文字の色（本文・メニュー・ステータスバー等。真っ黒より少し薄くして、線が太く見えないようにする） */
   --selection-bg: #c8d6e8; /* 範囲選択の色 */
 }
 
@@ -223,7 +223,8 @@ body.source-mode #editor-wrap { overflow: hidden; }
 #source-backdrop { background: #f0f0f0; color: transparent; pointer-events: none; }
 #source-backdrop mark { color: transparent; background: #ffe166; }
 #source-backdrop mark.current { background: #ffa54d; }
-#source { background: transparent; color: #000000; resize: none; outline: none; }
+#source { background: transparent; color: var(--text); resize: none; outline: none; }
+body.style-vscode #source { color: #000000; } /* VSCodeスタイルは本文と同じく黒 */
 body.full-width :is(#source, #source-backdrop) { --source-side: calc(30px * var(--zoom, 1)); }
 
 /* フォルダビュー（「フォルダを開く...」で開いた時だけ表示。行の色は mde と同じ） */

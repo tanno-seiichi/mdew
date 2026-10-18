@@ -10,7 +10,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <SolidColorBrush x:Key="WebMenuText" Color="#1C1C1C"/>
+    <SolidColorBrush x:Key="WebMenuText" Color="#333333"/>
     <SolidColorBrush x:Key="WebMenuBorder" Color="#C8CCD1"/>
     <SolidColorBrush x:Key="WebMenuHighlight" Color="#E8F0FE"/>
     <SolidColorBrush x:Key="WebMenuCheck" Color="#0B62C4"/>

@@ -82,6 +82,11 @@ mde の README（`C:\src\mde_refactor\refactor\README.md`）と比べたもの�
 
 ## 対応済み
 
+- [x] **文字の色を少し薄くする（#1c1c1c → #333333）**（2026-10-18）
+  - ほぼ黒（#1c1c1c）だと、ほかの Markdown エディタ（#333333）より線が太く見えたため。本文・ソースモード・メニュー
+    （右クリック・メニューバー（WebMenu.xaml））・ステータスバー等の文字の色をそろえて変えた（app.css の --text）。
+    VSCodeスタイルの本文・ソースモードは VS Code に合わせて黒のまま。ダイアログはメッセージボックスに合わせて今のまま
+
 - [x] **使っていない WebView2 の WinForms 用の DLL を、実行フォルダ・インストーラーから外す**（2026-10-18）
   - WebView2 のパッケージは WPF 用・WinForms 用の DLL をどちらも参照に加えるので、使っていない
     Microsoft.Web.WebView2.WinForms.dll も実行フォルダにコピーされ、mdew.deps.json にも載っていた。
