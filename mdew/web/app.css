@@ -7,7 +7,7 @@
   --ui-font: 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', sans-serif;
   --doc-font: 'Meiryo', 'Yu Gothic', sans-serif;
   --doc-font-size: 16px;
-  --doc-line-height: 1.63;
+  --doc-line-height: 1.6;
   --list-line-height: 1.6;
   --list-item-gap: 0.46em; /* 16px で約 7.4px（項目の最後の行から次の項目の最初の行まで約 33px） */
   --code-font: Consolas, 'Meiryo', monospace;
