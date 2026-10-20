@@ -51,11 +51,17 @@ namespace mdew.dialog
         }
 
         /// <summary>ウィンドウを表示して前に出し、検索する文字列の欄を選択した状態にする。</summary>
-        public void ShowAndFocus()
+        /// <param name="a_selectedText">編集領域で範囲選択していた文字列。空でなければ、検索する文字列の欄に入れる
+        /// （「正規表現を使用する」がオンの時は、そのままの文字列を探すよう、記号をエスケープして入れる）。</param>
+        public void ShowAndFocus(string a_selectedText = null)
         {
             if (!IsVisible)
             {
                 Show();
+            }
+            if (!string.IsNullOrEmpty(a_selectedText))
+            {
+                m_searchBox.Text = UseRegex ? System.Text.RegularExpressions.Regex.Escape(a_selectedText) : a_selectedText;
             }
             Activate();
             m_searchBox.Focus();

@@ -1071,9 +1071,27 @@ const findEngine = new FindEngine({
 });
 /** ブラウザ単体の自動テストで、ウィンドウへ送るはずだった表示の更新を記録する。 */
 const findUpdates = [];
-/** 検索と置換のウィンドウを開く（ホスト側の dialog\FindReplaceWindow。開いていれば前に出す）。 */
+/** 検索と置換のウィンドウを開く（ホスト側の dialog\FindReplaceWindow。開いていれば前に出す）。編集領域（ソースモードでは
+ * 入力欄）で文字列を範囲選択していれば、その文字列を検索する文字列に入れて開く（selectedTextForFind）。 */
 function openFindWindow() {
-  send({ cmd: 'openFind' });
+  send({ cmd: 'openFind', text: selectedTextForFind() });
+}
+/**
+ * 検索と置換のウィンドウを開く時に、検索する文字列に入れる文字列（編集領域・ソースモードの入力欄で範囲選択している文字列）。
+ * 選択していない時・複数行にまたがる時は ''（検索する文字列の入力欄は1行のため。入力欄は前回の内容のままにする）。
+ * @returns {string}
+ */
+function selectedTextForFind() {
+  let text = '';
+  if (state.sourceMode) {
+    text = sourceArea.value.slice(sourceArea.selectionStart, sourceArea.selectionEnd);
+  } else {
+    const sel = getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && $('doc').contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      text = sel.toString();
+    }
+  }
+  return /[\r\n]/.test(text) ? '' : text;
 }
 
 // ---- コマンド ---------------------------------------------------------------
@@ -1460,6 +1478,8 @@ const MENUS = {
     items: () => [
       { label: '新規', key: 'Ctrl+N', cmd: 'new' },
       { label: '開く', key: 'Ctrl+O', cmd: 'open' },
+      { label: 'フォルダを開く...', cmd: 'openFolder' },
+        null,
       // 最近使ったファイル（mde と同じくサブメニュー。パスはフルパスで表示する）
       {
         label: '最近使ったファイル',
@@ -1476,7 +1496,6 @@ const MENUS = {
             { label: '履歴をクリア', cmd: 'clearRecentFolders' }]
           : [{ label: '（履歴なし）', disabled: true }],
       },
-      { label: 'フォルダを開く...', cmd: 'openFolder' },
       null,
       { label: '保存', key: 'Ctrl+S', cmd: 'save' },
       { label: '名前を付けて保存', key: 'Ctrl+Shift+S', cmd: 'saveAs' },

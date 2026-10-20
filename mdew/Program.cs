@@ -285,7 +285,8 @@ namespace mdew
                     ConfirmClose(root.GetProperty("files"));
                     break;
                 case "openFind":
-                    ShowFindWindow();
+                    ShowFindWindow(root.TryGetProperty("text", out JsonElement findText) && JsonValueKind.String == findText.ValueKind
+                        ? findText.GetString() : null);
                     break;
                 case "findUpdate":
                     m_findWindow?.ApplyUpdate(root);
@@ -965,14 +966,15 @@ namespace mdew
 
         /// <summary>検索と置換のウィンドウを開く（開いていれば手前に出して、検索する文字列の入力欄に移る）。
         /// メインのウィンドウの外へも動かせる。メインのウィンドウを閉じると一緒に閉じる。</summary>
-        private void ShowFindWindow()
+        /// <param name="a_selectedText">編集領域で範囲選択していた文字列（検索する文字列に入れる。無ければ null か ''）。</param>
+        private void ShowFindWindow(string a_selectedText = null)
         {
             if (null == m_findWindow)
             {
                 m_findWindow = new dialog.FindReplaceWindow(SendFindCommand) { Owner = this };
             }
             m_findWindow.SetFolderAvailable(m_folderOpen);
-            m_findWindow.ShowAndFocus();
+            m_findWindow.ShowAndFocus(a_selectedText);
         }
 
         /// <summary>検索と置換のウィンドウでの操作を、入力された内容と一緒に HTML 側へ送る（findCommand）。</summary>
