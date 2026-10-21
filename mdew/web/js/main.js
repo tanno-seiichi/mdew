@@ -1220,9 +1220,9 @@ const commands = {
   textColorSharp: () => setTextColor('sharp'),
   textColorSoft: () => setTextColor('soft'),
   toggleSource: () => setSourceMode(!state.sourceMode),
-  zoomIn: () => setZoom(zoomLevel + ZOOM_STEP),
-  zoomOut: () => setZoom(zoomLevel - ZOOM_STEP),
-  zoomReset: () => setZoom(1),
+  zoomIn: () => changeZoom(nextZoomLevel(1)),
+  zoomOut: () => changeZoom(nextZoomLevel(-1)),
+  zoomReset: () => changeZoom(1),
   about: () => send({ cmd: 'about' }), // バージョン情報のウィンドウ（ホスト側の dialog\AboutWindow）
   // Readme を開く（実行フォルダの README.md を新しいウィンドウで開く。ホスト側の OpenReadme）
   readme: () => send({ cmd: 'openReadme' }),
@@ -1418,33 +1418,152 @@ try {
 // ---- 表示倍率（mde のステータスバーの「－」「100%」「＋」と同じ。次回起動時も同じにする）----------
 /** localStorage に保存するキー（値は倍率。1 が 100%）。 */
 const ZOOM_KEY = 'zoom';
-/** 1回の拡大・縮小で変える倍率（mde と同じ 10%）。 */
-const ZOOM_STEP = 0.1;
-/** 倍率の範囲（mde と同じ 50%〜250%）。 */
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 2.5;
+/**
+ * 選べる倍率（小さい順。mde と同じ。拡大・縮小はこの中の隣の倍率に移る）。倍率によっては（80%・60% 等）、
+ * 入力位置のカーソル（縦線）が画面のピクセルの境目に来る位置（行の先頭等）で消えてしまうため、カーソルが
+ * 消えないことを確かめた倍率だけにする。
+ */
+const ZOOM_LEVELS = [0.48, 0.57, 0.69, 0.83, 1, 1.2, 1.44, 1.72, 2.07, 2.48];
+/** 倍率の範囲（ZOOM_LEVELS の最小・最大）。 */
+const ZOOM_MIN = ZOOM_LEVELS[0];
+const ZOOM_MAX = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
 /** 今の表示倍率（1 が 100%）。 */
 let zoomLevel = 1;
 
 /**
+ * 倍率を ZOOM_LEVELS の中で一番近いものにそろえる（以前の版で保存した 80% 等の倍率も、選べる倍率にする）。
+ * @param {number} a_level 倍率（1 が 100%）
+ * @returns {number} ZOOM_LEVELS の中で一番近い倍率
+ */
+function snapZoomLevel(a_level) {
+  return ZOOM_LEVELS.reduce((a, b) => (Math.abs(b - a_level) < Math.abs(a - a_level) ? b : a));
+}
+
+/**
+ * 今の倍率の隣の倍率（ZOOM_LEVELS の中で、今より1つ大きい・小さいもの）を返す。端なら今の倍率のまま。
+ * @param {number} a_dir 1 なら拡大、-1 なら縮小
+ * @returns {number} 隣の倍率
+ */
+function nextZoomLevel(a_dir) {
+  const i = ZOOM_LEVELS.indexOf(snapZoomLevel(zoomLevel)) + a_dir;
+  return ZOOM_LEVELS[Math.max(0, Math.min(ZOOM_LEVELS.length - 1, i))];
+}
+
+/**
  * 文書の表示倍率を変える（文書の部分だけ。メニュー・アウトライン等は変えない）。Markdown の表示は文書全体
  * （文字・画像・余白）を拡大・縮小し（app.css の #doc の zoom）、ソースモードは文字の大きさを変える。
- * 文書の中の今見ている位置は保つ。
- * @param {number} a_level 倍率（1 が 100%。50%〜250% に収め、1% 単位に丸める）
+ * 編集ペインの一番上に見えている行は動かさない（captureZoomAnchor）。
+ * @param {number} a_level 倍率（1 が 100%。ZOOM_LEVELS の中で一番近いものにそろえる）
  */
 function setZoom(a_level) {
-  const level = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(a_level * 100) / 100));
-  const wrap = $('editor-wrap');
-  const ratio = wrap.scrollHeight > wrap.clientHeight ? wrap.scrollTop / (wrap.scrollHeight - wrap.clientHeight) : 0;
+  const level = snapZoomLevel(a_level);
+  if (level === zoomLevel) return;
+  const anchor = captureZoomAnchor();
+  const scale = level / zoomLevel;
   zoomLevel = level;
   document.documentElement.style.setProperty('--zoom', String(level));
-  if (wrap.scrollHeight > wrap.clientHeight) wrap.scrollTop = ratio * (wrap.scrollHeight - wrap.clientHeight);
+  restoreZoomAnchor(anchor, scale);
   try {
     localStorage.setItem(ZOOM_KEY, String(level));
   } catch {
     // 保存できなくても動作には影響しない（次回は 100% になるだけ）
   }
 }
+/** 拡大・縮小した時に、今の表示倍率をウィンドウの中央に表示する要素（app.css の #zoom-toast。showZoomToast）。 */
+const zoomToast = document.createElement('div');
+zoomToast.id = 'zoom-toast';
+zoomToast.setAttribute('aria-hidden', 'true');
+document.body.appendChild(zoomToast);
+/** zoomToast を消すタイマー。 */
+let zoomToastTimer = 0;
+
+/**
+ * 今の表示倍率を、ウィンドウの中央に大きく表示する（1秒ほど表示したら消える。続けて拡大・縮小した時は、表示し直して
+ * また1秒ほど表示する）。
+ */
+function showZoomToast() {
+  zoomToast.textContent = `${Math.round(zoomLevel * 100)}%`;
+  zoomToast.classList.add('show');
+  clearTimeout(zoomToastTimer);
+  zoomToastTimer = setTimeout(() => zoomToast.classList.remove('show'), 1000);
+}
+
+/**
+ * 利用者の操作（メニュー・キー・Ctrl+マウスホイール）で表示倍率を変え、今の倍率をウィンドウの中央に表示する
+ * （倍率が変わらない時、例えばもう一番大きい時も表示する）。
+ * @param {number} a_level 倍率（1 が 100%）
+ */
+function changeZoom(a_level) {
+  setZoom(a_level);
+  showZoomToast();
+}
+
+/**
+ * 表示倍率を変える直前に、編集ペインの一番上に見えている行を覚えておく（倍率を変えても、その行が動かないように
+ * する。restoreZoomAnchor）。倍率を変えると折り返しの位置も変わるため、行の中の文字の位置で覚えておく。
+ * @returns {object|null} 覚えておいた位置（restoreZoomAnchor に渡す）
+ */
+function captureZoomAnchor() {
+  if (state.sourceMode) {
+    // ソースモード：一番上に見えている行（後ろの要素の、1行に1つの span）と、そのどのくらいが上にスクロールされているか
+    if (0 === sourceArea.scrollTop) return null;
+    ensureSourceBackdrop();
+    const top = sourceArea.scrollTop + (parseFloat(getComputedStyle(sourceArea).paddingTop) || 0);
+    for (const span of sourceBackdrop.children) {
+      if (span.offsetTop + span.offsetHeight > top) {
+        return { span, fraction: span.offsetHeight > 0 ? Math.max(0, (top - span.offsetTop) / span.offsetHeight) : 0 };
+      }
+    }
+    return null;
+  }
+  const wrap = $('editor-wrap');
+  const wrapTop = wrap.getBoundingClientRect().top;
+  // 上端にかかっている（か、上端のすぐ下にある）ブロック
+  const block = [...$('doc').children].find((el) => el.getBoundingClientRect().bottom > wrapTop + 1);
+  if (!block) return null;
+  const br = block.getBoundingClientRect();
+  // ブロックの上端が見えている時は、そのブロックの上端の位置（上端からの距離）を覚えておく
+  if (br.top >= wrapTop) return { el: block, offset: br.top - wrapTop };
+  // ブロックの途中が上端にある時は、上端の行の文字の位置を覚えておく（横はブロックの真ん中。短い行なら行の末尾になる）
+  const range = document.caretRangeFromPoint(br.left + br.width / 2, wrapTop + 1);
+  const rect = range && block.contains(range.startContainer) ? range.getBoundingClientRect() : null;
+  if (rect && rect.height > 0 && Math.abs(rect.top - wrapTop) < rect.height * 2) {
+    return { range, offset: rect.top - wrapTop };
+  }
+  // 行が分からない時（画像の途中等）は、ブロックのどのくらいが上にスクロールされているか
+  return { el: block, fraction: br.height > 0 ? (wrapTop - br.top) / br.height : 0 };
+}
+
+/**
+ * captureZoomAnchor で覚えておいた行が、表示倍率を変えた後も同じ位置に来るようスクロールする。
+ * @param {object|null} a_anchor captureZoomAnchor の戻り値
+ * @param {number} a_scale 倍率の変化（新しい倍率 ÷ 前の倍率。上端からの距離も同じ割合で変える）
+ */
+function restoreZoomAnchor(a_anchor, a_scale) {
+  if (!a_anchor) return;
+  if (a_anchor.span) {
+    if (!a_anchor.span.isConnected) return;
+    const pad = parseFloat(getComputedStyle(sourceArea).paddingTop) || 0;
+    sourceArea.scrollTop = Math.max(0, a_anchor.span.offsetTop + a_anchor.fraction * a_anchor.span.offsetHeight - pad);
+    sourceBackdrop.scrollTop = sourceArea.scrollTop;
+    return;
+  }
+  const wrap = $('editor-wrap');
+  const wrapTop = wrap.getBoundingClientRect().top;
+  let delta;
+  if (a_anchor.range) {
+    if (!a_anchor.range.startContainer.isConnected) return;
+    delta = a_anchor.range.getBoundingClientRect().top - wrapTop - a_anchor.offset * a_scale;
+  } else {
+    if (!a_anchor.el.isConnected) return;
+    const br = a_anchor.el.getBoundingClientRect();
+    delta = undefined !== a_anchor.offset
+      ? br.top - wrapTop - a_anchor.offset * a_scale
+      : br.top - wrapTop + a_anchor.fraction * br.height;
+  }
+  wrap.scrollTop += delta;
+}
+
 // 前回の倍率を復元する
 try {
   const saved = Number(localStorage.getItem(ZOOM_KEY));
@@ -1453,14 +1572,14 @@ try {
   // 読み込めなければ 100% のまま
 }
 // Ctrl+マウスホイールで拡大・縮小する（編集ペインの上で。mde と同じ。タッチパッドの2本指の操作のように少しずつ
-// 届く場合は、ホイール1目盛り分（100）たまるごとに 10% ずつ変える）
+// 届く場合は、ホイール半目盛り分（50）たまるごとに隣の倍率に変える）
 let zoomWheelDelta = 0;
 $('editor-wrap').addEventListener('wheel', (e) => {
   if (!e.ctrlKey) return;
   e.preventDefault();
   zoomWheelDelta += e.deltaY;
   if (Math.abs(zoomWheelDelta) < 50) return;
-  setZoom(zoomLevel + (zoomWheelDelta < 0 ? ZOOM_STEP : -ZOOM_STEP));
+  changeZoom(nextZoomLevel(zoomWheelDelta < 0 ? 1 : -1));
   zoomWheelDelta = 0;
 }, { passive: false });
 

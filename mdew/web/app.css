@@ -305,11 +305,21 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* 画像はダブルクリックで開ける（右クリックの「画像を開く」も同じ） */
 #doc img { cursor: pointer; }
 
+/* 拡大・縮小した時に、今の表示倍率をウィンドウの中央に1秒ほど表示する（main.js の showZoomToast）。半透明の黒の背景に
+   白い大きな文字。消える時は少しずつ薄くする。マウスの操作は受け取らない */
+#zoom-toast {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1000;
+  padding: 10px 28px; border-radius: 8px; background: rgba(0, 0, 0, 0.6); color: #ffffff;
+  font-family: var(--ui-font); font-size: 36px; line-height: 1.3; white-space: nowrap;
+  pointer-events: none; opacity: 0; transition: opacity 0.25s;
+}
+#zoom-toast.show { opacity: 1; transition: none; }
+
 /* ===== PDF に書き出す時（印刷）の見た目。余白・用紙（A4）はホストが指定する（Program.cs の ExportPdfAsync） ===== */
 #print-doc { display: none; }
 @media print {
   html, body { height: auto; }
-  #app, .md-menu { display: none !important; }
+  #app, .md-menu, #zoom-toast { display: none !important; }
   #print-doc { display: block; }
   #print-doc > :first-child { margin-top: 0; }
   #print-doc :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
