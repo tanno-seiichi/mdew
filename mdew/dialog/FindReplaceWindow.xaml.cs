@@ -17,6 +17,10 @@ namespace mdew.dialog
         /// <summary>命令を画面側へ送る処理（action と、一覧の行の番号。番号を使わない命令は -1）。</summary>
         private readonly Action<string, int> m_onCommand;
 
+        /// <summary>結果の一覧の高さの上限（XAML の MaxHeight）。ウィンドウの大きさを変えた時になくし、「すべて検索」で
+        /// ウィンドウの高さを中身に合わせ直す時に戻す（FitHeightToContent）。</summary>
+        private readonly double m_resultsListMaxHeight;
+
         /// <summary>本当に閉じてよいか（メインのウィンドウを閉じる時だけ true にする。それ以外は隠すだけ）。</summary>
         public bool AllowClose { get; set; }
 
@@ -26,6 +30,16 @@ namespace mdew.dialog
         {
             InitializeComponent();
             m_onCommand = a_onCommand;
+            m_resultsListMaxHeight = m_resultsList.MaxHeight;
+            // 利用者がウィンドウの大きさを変えると（WPF が SizeToContent を Manual にする）、結果の一覧の高さの上限（MaxHeight。
+            // 開いた時に中身に合わせて大きくなりすぎないためのもの）をなくし、一覧がウィンドウの高さに合わせて伸び縮みするようにする
+            SizeChanged += (s, e) =>
+            {
+                if (SizeToContent.Manual == SizeToContent)
+                {
+                    m_resultsList.ClearValue(MaxHeightProperty);
+                }
+            };
         }
 
         /// <summary>検索する文字列。</summary>
@@ -131,12 +145,24 @@ namespace mdew.dialog
             Owner?.Activate();
         }
 
+        /// <summary>ウィンドウの高さを、開いた時と同じく中身に合わせた高さに戻す（大きさを変えた後でも、「すべて検索」で
+        /// 結果の数に合った高さになるように）。幅は変えない。</summary>
+        private void FitHeightToContent()
+        {
+            m_resultsList.MaxHeight = m_resultsListMaxHeight;
+            SizeToContent = SizeToContent.Height;
+        }
+
         /// <summary>前を検索。</summary>
         private void FindPreviousClick(object a_sender, RoutedEventArgs a_args) => m_onCommand("prev", -1);
         /// <summary>次を検索。</summary>
         private void FindNextClick(object a_sender, RoutedEventArgs a_args) => m_onCommand("next", -1);
         /// <summary>すべて検索（Enter でも実行する）。</summary>
-        private void FindAllClick(object a_sender, RoutedEventArgs a_args) => m_onCommand("all", -1);
+        private void FindAllClick(object a_sender, RoutedEventArgs a_args)
+        {
+            FitHeightToContent();
+            m_onCommand("all", -1);
+        }
         /// <summary>1件ずつ置換…。</summary>
         private void StepReplaceClick(object a_sender, RoutedEventArgs a_args) => m_onCommand("stepStart", -1);
         /// <summary>すべて置換。</summary>

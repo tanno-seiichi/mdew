@@ -21,44 +21,54 @@
     <Window.Resources>
         <ResourceDictionary Source="/mdew;component/dialog/DialogStyles.xaml"/>
     </Window.Resources>
-    <StackPanel Margin="22,22,22,0">
+    <!-- 結果の一覧（m_resultsList）は、ウィンドウの大きさを変えた時に一緒に伸び縮みするよう、残りの高さ全部（2行目の *）を使う。
+         ウィンドウを開いた時・結果を表示した時は、中身に合わせた高さ（SizeToContent="Height"。一覧は MaxHeight まで）になる -->
+    <Grid Margin="22,22,22,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        <TextBlock Text="検索する文字列"/>
-        <TextBox x:Name="m_searchBox" Padding="6,4" Margin="0,4,0,12" FontFamily="Consolas, Meiryo"/>
+        <StackPanel Grid.Row="0">
 
-        <Expander x:Name="m_replaceExpander" Header="置換後の文字列" Margin="0,0,0,14"
-                  Expanded="ReplaceExpanderToggled" Collapsed="ReplaceExpanderToggled">
-            <TextBox x:Name="m_replaceBox" Padding="6,4" Margin="0,2,0,0" FontFamily="Consolas, Meiryo"/>
-        </Expander>
+            <TextBlock Text="検索する文字列"/>
+            <TextBox x:Name="m_searchBox" Padding="6,4" Margin="0,4,0,12" FontFamily="Consolas, Meiryo"/>
 
-        <TextBlock Text="対象範囲" Margin="0,0,0,6"/>
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-            <RadioButton x:Name="m_scopeCurrentFile" Content="現在のファイル" GroupName="scope" IsChecked="True" VerticalAlignment="Center"/>
-            <RadioButton x:Name="m_scopeFolder" Content="フォルダ全体（サブフォルダ含む）" GroupName="scope" Margin="20,0,0,0" VerticalAlignment="Center"/>
+            <Expander x:Name="m_replaceExpander" Header="置換後の文字列" Margin="0,0,0,14"
+                      Expanded="ReplaceExpanderToggled" Collapsed="ReplaceExpanderToggled">
+                <TextBox x:Name="m_replaceBox" Padding="6,4" Margin="0,2,0,0" FontFamily="Consolas, Meiryo"/>
+            </Expander>
+
+            <TextBlock Text="対象範囲" Margin="0,0,0,6"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                <RadioButton x:Name="m_scopeCurrentFile" Content="現在のファイル" GroupName="scope" IsChecked="True" VerticalAlignment="Center"/>
+                <RadioButton x:Name="m_scopeFolder" Content="フォルダ全体（サブフォルダ含む）" GroupName="scope" Margin="20,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                <CheckBox x:Name="m_caseSensitiveBox" Content="大文字・小文字を区別する"/>
+                <CheckBox x:Name="m_useRegexBox" Content="正規表現を使用する" Margin="20,0,0,0"/>
+            </StackPanel>
+
+            <WrapPanel>
+                <Button Content="前を検索" MinWidth="86" Margin="0,0,8,8" Click="FindPreviousClick"/>
+                <Button Content="次を検索" MinWidth="86" Margin="0,0,8,8" Click="FindNextClick"/>
+                <Button Content="すべて検索" MinWidth="86" Margin="0,0,8,8" Click="FindAllClick" IsDefault="True"/>
+                <Button x:Name="m_stepReplaceButton" Content="1件ずつ置換…" MinWidth="86" Margin="0,0,8,8" Click="StepReplaceClick"
+                        Visibility="Collapsed"/>
+                <Button x:Name="m_replaceAllButton" Content="すべて置換" MinWidth="86" Margin="0,0,8,8" Click="ReplaceAllClick"
+                        Visibility="Collapsed"/>
+            </WrapPanel>
+
+            <TextBlock x:Name="m_statusText" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12" Foreground="#666666"/>
         </StackPanel>
 
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-            <CheckBox x:Name="m_caseSensitiveBox" Content="大文字・小文字を区別する"/>
-            <CheckBox x:Name="m_useRegexBox" Content="正規表現を使用する" Margin="20,0,0,0"/>
-        </StackPanel>
-
-        <WrapPanel>
-            <Button Content="前を検索" MinWidth="86" Margin="0,0,8,8" Click="FindPreviousClick"/>
-            <Button Content="次を検索" MinWidth="86" Margin="0,0,8,8" Click="FindNextClick"/>
-            <Button Content="すべて検索" MinWidth="86" Margin="0,0,8,8" Click="FindAllClick" IsDefault="True"/>
-            <Button x:Name="m_stepReplaceButton" Content="1件ずつ置換…" MinWidth="86" Margin="0,0,8,8" Click="StepReplaceClick"
-                    Visibility="Collapsed"/>
-            <Button x:Name="m_replaceAllButton" Content="すべて置換" MinWidth="86" Margin="0,0,8,8" Click="ReplaceAllClick"
-                    Visibility="Collapsed"/>
-        </WrapPanel>
-
-        <TextBlock x:Name="m_statusText" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12" Foreground="#666666"/>
-
-        <ListBox x:Name="m_resultsList" Margin="0,8,0,20" MaxHeight="500" Visibility="Collapsed"
+        <ListBox x:Name="m_resultsList" Grid.Row="1" Margin="0,8,0,20" MaxHeight="500" MinHeight="60" Visibility="Collapsed"
                  MouseDoubleClick="ResultsListMouseDoubleClick" FontFamily="Consolas, Meiryo" FontSize="12"/>
 
         <!-- 1件ずつ置換の途中に表示する欄 -->
-        <Border x:Name="m_stepPanel" Visibility="Collapsed" Margin="0,14,0,0" Padding="14"
+        <Border x:Name="m_stepPanel" Grid.Row="2" Visibility="Collapsed" Margin="0,14,0,0" Padding="14"
                 Background="#EEF4FB" BorderBrush="#C8DCF0" BorderThickness="1" CornerRadius="4">
             <StackPanel>
                 <TextBlock x:Name="m_stepFileText" FontSize="11" FontFamily="Consolas, Meiryo"
@@ -74,5 +84,5 @@
             </StackPanel>
         </Border>
 
-    </StackPanel>
+    </Grid>
 </Window>
