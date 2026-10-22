@@ -345,6 +345,22 @@ export function escapeHtml(a_text) {
  */
 const alignAttr = (a_align) => (a_align ? ` data-align="${a_align}" style="text-align:${a_align}"` : '');
 
+/** 表のセルの先頭のチェックボックスの記号（「[ ]」「[x]」。後ろは空白かセルの終わり）。 */
+const RE_CELL_CHECKBOX = /^\[([ xX])\](?:[ \t]+|$)/;
+
+/**
+ * 表の見出しの行以外のセルの中身を HTML にする。セルの先頭の「[ ]」「[x]」は、チェックボックスにする（箇条書きの
+ * チェックボックスと同じ見た目・操作。見出しの行のセルはチェックボックスにしない）。
+ * @param {string} a_text セルの Markdown の文字列
+ * @returns {string} HTML
+ */
+function renderBodyCell(a_text) {
+  const m = a_text.match(RE_CELL_CHECKBOX);
+  if (!m) return renderInline(a_text);
+  const box = `<input type="checkbox" contenteditable="false"${'x' === m[1].toLowerCase() ? ' checked' : ''}>`;
+  return `${box}${renderInline(a_text.slice(m[0].length)) || '<br>'}`;
+}
+
 /**
  * ブロックを画面の HTML にする。中身が空の見出し・段落・項目には、カーソルを置けるよう <br> を入れる。
  * @param {object} a_block parseBlocks・parseLines が返したブロック
@@ -367,7 +383,7 @@ export function renderBlock(a_block) {
     case 'table': {
       const head = a_block.header.map((c, k) => `<th${alignAttr(a_block.aligns[k])}>${renderInline(c)}</th>`).join('');
       const body = a_block.rows.map((r) =>
-        `<tr>${a_block.header.map((_, k) => `<td${alignAttr(a_block.aligns[k])}>${renderInline(r[k] || '')}</td>`).join('')}</tr>`).join('');
+        `<tr>${a_block.header.map((_, k) => `<td${alignAttr(a_block.aligns[k])}>${renderBodyCell(r[k] || '')}</td>`).join('')}</tr>`).join('');
       return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     }
     case 'list': {
@@ -926,7 +942,14 @@ function serializeList(a_el, a_opts) {
 function serializeTable(a_el) {
   const rows = [...a_el.querySelectorAll('tr')];
   if (0 === rows.length) return '';
-  const cellText = (c) => serializeInline(c).replace(/\n/g, ' ').replace(/\|/g, '\\|').trim();
+  // セルのチェックボックス（renderBodyCell）は、セルの先頭の「[ ]」「[x]」にする
+  const cellText = (c) => {
+    const box = c.querySelector(':scope > input[type=checkbox]');
+    const prefix = box ? (box.checked ? '[x] ' : '[ ] ') : '';
+    // （チェックボックスの直後に打った空白は、「[ ]」の後ろの空白と重なるので除く）
+    const text = box ? serializeInline(c).trimStart() : serializeInline(c);
+    return (prefix + text).replace(/\n/g, ' ').replace(/\|/g, '\\|').trim();
+  };
   const headerCells = [...rows[0].children];
   const out = [`| ${headerCells.map(cellText).join(' | ')} |`];
   out.push(`| ${headerCells.map((c) => {

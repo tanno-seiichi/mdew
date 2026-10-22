@@ -747,7 +747,8 @@ export class Editor {
   }
 
   /**
-   * 行頭の「# 」「- 」「1. 」「> 」「[ ] 」を、見出し・リスト・引用・チェックボックスにする。
+   * 行頭の「# 」「- 」「1. 」「> 」「[ ] 」を、見出し・リスト・引用・チェックボックスにする（「[ ] 」は、箇条書きの
+   * 項目の先頭と、表の見出しの行以外のセルの先頭）。
    * @returns {boolean} 変換したか
    */
   applyBlockRule() {
@@ -784,11 +785,16 @@ export class Editor {
       this.placeCaretAtStart(container);
       return true;
     }
-    if ('LI' === block.tagName && /^\[([ xX]?)\] $/.test(before) && !block.querySelector(':scope > input[type=checkbox]')) {
+    // 表のセルでは、後ろにスペースを打たなくても、セルの中身が「[ ]」「[x]」だけになった時（「]」を打った時）に
+    // 変換する（セルの先頭の「[ ]」「[x]」は、後ろが空白でもセルの終わりでも、読み込むとチェックボックスになるため）
+    const cellOnlyBox = 'TD' === block.tagName && /^\[[ xX]\]$/.test(before) &&
+      before === block.textContent.replace(/[\u00a0\u3000]/g, ' ').replace(/\u200b/g, '').trimEnd();
+    if (('LI' === block.tagName || 'TD' === block.tagName) && (/^\[([ xX]?)\] $/.test(before) || cellOnlyBox) &&
+        !block.querySelector(':scope > input[type=checkbox]')) {
       this.checkpoint('edit');
       const checked = /x/i.test(before);
       this.deleteBeforeCaret(block);
-      block.classList.add('task');
+      if ('LI' === block.tagName) block.classList.add('task');
       block.prepend(createCheckbox(checked));
       this.placeCaretAtStart(block);
       return true;
@@ -1122,7 +1128,7 @@ export class Editor {
   }
 
   /**
-   * BackSpace キー。行頭で押した時に、チェックボックス・見出し・引用を解除する。
+   * BackSpace キー。行頭で押した時に、チェックボックス（箇条書きの項目・表のセル）・見出し・引用を解除する。
    * @param {KeyboardEvent} e
    * @param {HTMLElement} a_block カーソルのある、文字を書く単位の要素
    * @returns {boolean} 文書を変更したか
@@ -1130,9 +1136,9 @@ export class Editor {
   onBackspace(e, a_block) {
     const sel = getSelection();
     if (!sel.isCollapsed || '' !== this.textBeforeCaret(a_block)) return false;
-    const box = 'LI' === a_block.tagName ? a_block.querySelector(':scope > input[type=checkbox]') : null;
+    const box = 'LI' === a_block.tagName || 'TD' === a_block.tagName ? a_block.querySelector(':scope > input[type=checkbox]') : null;
     if (box) {
-      // チェックボックスの項目の先頭で BackSpace：チェックボックスを外して通常の項目に戻す
+      // チェックボックスの項目・セルの先頭で BackSpace：チェックボックスを外して通常の項目・セルに戻す
       e.preventDefault();
       this.checkpoint('edit');
       const next = box.nextSibling;

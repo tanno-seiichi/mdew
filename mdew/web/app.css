@@ -109,6 +109,10 @@ body.full-width #doc :is(th, td) { overflow-wrap: anywhere; min-width: 0; }
   position: absolute; left: -1.35em; top: calc((var(--list-line-height) - 1) * 0.5em + 0.105em);
   margin: 0; width: 0.85em; height: 0.85em; cursor: pointer;
 }
+:is(#doc, #print-doc) td > input[type=checkbox] {
+  /* 表のセルのチェックボックス（セルの先頭の「[ ]」「[x]」。markdown.js の renderBodyCell）：文字と同じ行の先頭に置く */
+  margin: 0 0.4em 0 0; width: 0.85em; height: 0.85em; vertical-align: -0.1em; cursor: pointer;
+}
 :is(#doc, #print-doc) blockquote { margin: 0 0 0.8em; padding: 0 1em; border-left: 4px solid #d0d7de; color: #555; }
 :is(#doc, #print-doc) blockquote > :last-child { margin-bottom: 0; }
 :is(#doc, #print-doc) hr { border: none; border-top: 2px solid #d0d7de; margin: 1.2em 0; }

@@ -282,7 +282,14 @@ function appendInlines(a_row, a_nodes, a_imageUrl, a_outerMore) {
         a_row.text += '\n';
         break;
       case 'IMG': appendImage(a_row, node, a_imageUrl, more); break;
-      case 'INPUT': break;
+      case 'INPUT':
+        // 表のセルのチェックボックスは、☑・☐ の文字にする（箇条書きのチェックボックスは、行の先頭の記号で表す。collectListRows）
+        if ('checkbox' === node.type && /^(TD|TH)$/.test(node.parentNode.tagName)) {
+          const mark = node.checked ? '☑ ' : '☐ ';
+          a_row.text += mark;
+          a_row.html += esc(mark);
+        }
+        break;
       case 'STRONG': case 'B': wrap('<b>', '</b>'); break;
       case 'EM': case 'I': wrap('<i>', '</i>'); break;
       case 'DEL': case 'S': case 'STRIKE': wrap('<s>', '</s>'); break;
