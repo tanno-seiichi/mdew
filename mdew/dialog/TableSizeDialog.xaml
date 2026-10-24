@@ -11,7 +11,7 @@
         ShowInTaskbar="False"
         FontFamily="Yu Gothic UI, Meiryo UI, Segoe UI"
         FontSize="12"
-        Background="#FFFFFF">
+        Background="{DynamicResource DlgWindowBackground}">
     <Window.Resources>
         <ResourceDictionary>
         <ResourceDictionary.MergedDictionaries>
@@ -20,13 +20,13 @@
         </ResourceDictionary.MergedDictionaries>
             <Style x:Key="Caption" TargetType="TextBlock">
                 <Setter Property="Margin" Value="0,0,0,4"/>
-                <Setter Property="Foreground" Value="#555555"/>
+                <Setter Property="Foreground" Value="{DynamicResource DlgSubText}"/>
             </Style>
         </ResourceDictionary>
     </Window.Resources>
     <StackPanel Margin="22">
         <TextBlock Text="表のサイズを指定してください" Margin="0,0,0,16"
-                   Foreground="#1C1C1C" FontWeight="Bold"/>
+                   Foreground="{DynamicResource DlgText}" FontWeight="Bold"/>
 
         <TextBlock Text="行数（見出し行を含む）" Style="{StaticResource Caption}"/>
         <TextBox x:Name="m_rowsBox" Text="3" Margin="0,0,0,14" Padding="6,4"/>

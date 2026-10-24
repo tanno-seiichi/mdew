@@ -33,6 +33,9 @@ namespace mdew
         /// <summary>最近使ったフォルダ（フルパス。先頭が最新。メニュー「ファイル」→「最近使ったフォルダ」）。</summary>
         public System.Collections.Generic.List<string> RecentFolders { get; set; } = new System.Collections.Generic.List<string>();
 
+        /// <summary>テーマ（メニュー「表示」→「テーマ」。system：Windows の設定に合わせる、light：ライト、dark：ダーク。Theme.cs）。</summary>
+        public string Theme { get; set; } = "system";
+
         /// <summary>設定ファイルのパス。</summary>
         private static readonly string s_path = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "settings.json");

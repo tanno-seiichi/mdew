@@ -9,12 +9,12 @@
         Title="検索と置換"
         Width="550"
         SizeToContent="Height"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="Manual"
         ResizeMode="CanResizeWithGrip"
         ShowInTaskbar="False"
         FontFamily="Yu Gothic UI, Meiryo UI, Segoe UI"
         FontSize="12"
-        Background="#FFFFFF"
+        Background="{DynamicResource DlgWindowBackground}"
         PreviewKeyDown="FindReplaceWindowPreviewKeyDown">
     <!-- 部品の見た目（dialog\DialogStyles.xaml）。ボタンの間隔・幅は、各ボタンに直接書く（ここにボタンの Style を足して
          BasedOn で DialogStyles のボタンの見た目を引き継ごうとすると、WPF の既定の見た目を引き継いでしまうため） -->
@@ -61,7 +61,7 @@
                         Visibility="Collapsed"/>
             </WrapPanel>
 
-            <TextBlock x:Name="m_statusText" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12" Foreground="#666666"/>
+            <TextBlock x:Name="m_statusText" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource DlgStatusText}"/>
         </StackPanel>
 
         <ListBox x:Name="m_resultsList" Grid.Row="1" Margin="0,8,0,20" MaxHeight="500" MinHeight="60" Visibility="Collapsed"
@@ -69,12 +69,12 @@
 
         <!-- 1件ずつ置換の途中に表示する欄 -->
         <Border x:Name="m_stepPanel" Grid.Row="2" Visibility="Collapsed" Margin="0,14,0,0" Padding="14"
-                Background="#EEF4FB" BorderBrush="#C8DCF0" BorderThickness="1" CornerRadius="4">
+                Background="{DynamicResource DlgInfoBackground}" BorderBrush="{DynamicResource DlgInfoBorder}" BorderThickness="1" CornerRadius="4">
             <StackPanel>
                 <TextBlock x:Name="m_stepFileText" FontSize="11" FontFamily="Consolas, Meiryo"
-                           Foreground="#0B62C4" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                           Foreground="{DynamicResource DlgInfoLink}" Margin="0,0,0,6" TextWrapping="Wrap"/>
                 <TextBlock x:Name="m_stepContextText" FontFamily="Consolas, Meiryo" FontSize="12" TextWrapping="Wrap"
-                           Foreground="#1C1C1C" Margin="0,0,0,12"/>
+                           Foreground="{DynamicResource DlgText}" Margin="0,0,0,12"/>
                 <WrapPanel>
                     <Button Content="置換" MinWidth="80" Margin="0,0,8,8" Click="StepReplaceOneClick"/>
                     <Button Content="スキップ" MinWidth="80" Margin="0,0,8,8" Click="StepSkipClick"/>

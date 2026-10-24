@@ -7,7 +7,14 @@
         mc:Ignorable="d"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
-        Title="AboutWindow" Height="200" Width="230">
+        Title="AboutWindow" Height="200" Width="230"
+        Background="{DynamicResource DlgWindowBackground}">
+    <!-- 文字・背景の色は、ダークモードの時に Theme.cs が暗い色にする（DlgText・DlgWindowBackground。明るい時は既定の色） -->
+    <Window.Resources>
+        <Style TargetType="Label">
+            <Setter Property="Foreground" Value="{DynamicResource DlgText}"/>
+        </Style>
+    </Window.Resources>
     <StackPanel Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Center">
         <Image x:Name="m_appIcon" Width="55" Height="55" Margin="0,0,0,5" Source="/images/mde.png"/>
         <Label x:Name="m_appTitle" HorizontalAlignment="Center" Padding="0" FontSize="15" Content="AppTitle"/>

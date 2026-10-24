@@ -246,10 +246,6 @@ body.folder-open #folder-splitter { display: block; }
 body.folder-open.no-folderpane #folder, body.folder-open.no-folderpane #folder-splitter { display: none; }
 #folder .pane-header { display: flex; align-items: center; padding-right: 6px; }
 #folder .pane-header .pane-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#folder-reopen {
-  font: inherit; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: pointer;
-}
-#folder-reopen:hover { background: #e6e8eb; border-color: var(--line); }
 #folder-tree, #folder-tree ul { list-style: none; margin: 0; padding: 0; }
 #folder-tree { padding-bottom: 12px; }
 #folder-tree .row {
@@ -329,4 +325,106 @@ body.resizing { cursor: col-resize; user-select: none; }
   #print-doc :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
   #print-doc :is(img, tr) { break-inside: avoid; }
   #print-doc pre { white-space: pre-wrap; }
+}
+
+/* ===== ダークテーマ（メニュー「表示」→「テーマ」・Windows の設定で暗い配色の時。ホストが theme で知らせる。main.js の applyTheme・
+   Program.cs の Theme.cs） =====
+   --vs-* はホストが送ってくる色（届かない時は括弧内の色。名前は mdevs（Visual Studio 版）とそろえてある）。
+   PDF の印刷用の文書（#print-doc）は対象外（PDF は明るい配色のまま） */
+body.theme-dark {
+  color-scheme: dark; /* スクロールバー・チェックボックス・入力欄も暗い色にする */
+  --bg: var(--vs-bg, #1f1f1f);
+  --panel-bg: color-mix(in srgb, var(--bg) 88%, #ffffff);
+  --hover-bg: color-mix(in srgb, var(--bg) 78%, #ffffff);
+  --line: var(--vs-border, #3f3f46);
+  --pane-bg: var(--panel-bg);
+  --code-bg: color-mix(in srgb, var(--bg) 85%, #ffffff);
+  --code-block-bg: color-mix(in srgb, var(--bg) 90%, #ffffff);
+  --code-border: #4a4a4f;
+  --rule: #4a4a4f; /* 見出しの下・横線・引用の線 */
+  --selection-bg: #264f78;
+  --link: #4daafc;
+  --vscode-separator: #4a4a4f;
+}
+body.theme-dark, body.theme-dark.text-soft {
+  --text: var(--vs-fg, #e0e0e0);
+  --vscode-text: var(--vs-fg, #e0e0e0);
+}
+body.theme-dark.text-soft { --text: color-mix(in srgb, var(--vs-fg, #e0e0e0) 85%, var(--bg)); --vscode-text: var(--text); }
+body.theme-dark { background: var(--bg); }
+body.theme-dark #outline { background: var(--pane-bg); }
+body.theme-dark .pane-title, body.theme-dark #outline-list .toggle { color: #9a9a9a; }
+body.theme-dark #outline-list li:hover { background: var(--hover-bg); }
+body.theme-dark #statusbar { background: var(--bg); color: #b0b0b0; }
+body.theme-dark #statusbar .status-btn:hover { background: var(--hover-bg); }
+body.theme-dark #status-dirty { color: #f48771; }
+
+/* 文書 */
+body.theme-dark #doc :is(h1, h2) { border-bottom-color: var(--rule); }
+body.theme-dark #doc blockquote { border-left-color: #5a5a60; color: #a8a8a8; }
+body.theme-dark #doc hr { border-top-color: var(--rule); }
+body.theme-dark #doc pre[data-info]:not([data-info=""])::before { color: #8a8a8a; }
+body.theme-dark #doc .md-raw { color: #9a9a9a; border-left-color: #4a4a4f; }
+/* 表：見出しの行の背景は、枠線より明るい灰色（枠線と見分けやすく） */
+body.theme-dark #doc :is(th, td) { border-color: #4f4f55; }
+body.theme-dark #doc th { background: color-mix(in srgb, var(--bg) 66%, #ffffff); }
+body.theme-dark #doc mark { background: #6b5a00; color: inherit; }
+body.theme-dark.style-vscode #doc a { color: var(--link); }
+body.theme-dark.style-vscode #doc code { color: #ce9178; background: rgba(255, 255, 255, 0.1); }
+body.theme-dark.style-vscode #doc pre { background: rgba(255, 255, 255, 0.06); }
+body.theme-dark.style-vscode #doc pre code { color: inherit; background: none; }
+body.theme-dark.style-vscode #doc blockquote { background: rgba(127, 127, 127, 0.1); border-left-color: rgba(0, 122, 204, 0.5); color: inherit; }
+body.theme-dark.style-vscode #doc :is(th, td) { border-color: transparent; }
+body.theme-dark.style-vscode #doc th { background: none; border-bottom: 1px solid var(--text); }
+body.theme-dark.style-vscode #doc tr + tr > td { border-top-color: var(--vscode-separator); }
+
+/* ソースモード */
+body.theme-dark #source-backdrop { background: var(--code-block-bg); }
+body.theme-dark #source { color: var(--text); }
+body.theme-dark #source-backdrop mark { background: #6b5a00; }
+body.theme-dark #source-backdrop mark.current { background: #a35a00; }
+
+/* 検索：見つかった箇所・今の箇所（明るい文字が読めるよう、暗い黄色・オレンジ） */
+body.theme-dark ::highlight(find-all) { background-color: #6b5a00; }
+body.theme-dark ::highlight(find-current) { background-color: #a35a00; }
+body.theme-dark #outline-list li.search-hit { background: #6b5a00; }
+body.theme-dark #outline-list li.search-current { background: #264f78; }
+body.theme-dark #outline-list li.search-hit.search-current { background: #6b5a00; outline-color: #4daafc; }
+
+/* 右クリックのメニュー（Visual Studio のメニューの色） */
+body.theme-dark .md-menu {
+  background: var(--vs-menu-bg, #2b2b2b); border-color: var(--vs-menu-border, #454545); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+body.theme-dark .md-menu button { color: var(--vs-menu-fg, var(--text)); }
+body.theme-dark .md-menu button .check { color: var(--link); }
+body.theme-dark .md-menu button .key, body.theme-dark .md-menu .heading { color: #9a9a9a; }
+body.theme-dark .md-menu button:disabled, body.theme-dark .md-menu button:disabled .key { color: #6e6e6e; }
+body.theme-dark .md-menu button:hover:not(:disabled), body.theme-dark .md-menu button.submenu-open,
+body.theme-dark .md-menu button.active:not(:disabled) {
+  background: var(--vs-menu-hover, #094771); color: var(--vs-menu-hover-fg, var(--vs-menu-fg, var(--text)));
+}
+body.theme-dark .md-menu.kbd button:hover:not(.active):not(.submenu-open) { background: none; color: var(--vs-menu-fg, var(--text)); }
+body.theme-dark .md-menu hr { border-top-color: var(--vs-menu-sep, #454545); }
+
+/* メニューバー・フォルダビュー（mdevs には無い部分） */
+body.theme-dark #menubar { background: var(--bg); }
+body.theme-dark #menubar button { color: var(--text); }
+body.theme-dark #menubar button:hover, body.theme-dark #menubar button.menu-open { background: var(--hover-bg); }
+body.theme-dark #folder { background: var(--pane-bg); border-right-color: #5a5a5a; } /* アウトラインとの境目（同じ背景の色なので明るめの線） */
+body.theme-dark #folder-tree .row:hover { background: var(--hover-bg); }
+body.theme-dark #folder-tree .toggle { color: #9a9a9a; }
+body.theme-dark #folder-tree .row.current { background: #264f78; }
+body.theme-dark #folder-tree .row.hit { background: #6b5a00; }
+body.theme-dark #folder-tree .row.current.hit { border-color: #4daafc; }
+body.theme-dark #statusbar .status-btn:hover { border-color: var(--line); }
+
+/* PDF に書き出す時（印刷）は、ダークテーマの時も明るい配色で書き出す（上の body.theme-dark の色を、既定の色に戻す） */
+@media print {
+  body.theme-dark {
+    color-scheme: light; background: #ffffff;
+    --text: #1c1c1c; --vscode-text: #000000; --line: #dddfe2; --pane-bg: #f6f7f9;
+    --code-bg: #f8f8f8; --code-block-bg: #f8f8f8; --code-border: #ccd0d4; --selection-bg: #c8d6e8;
+    --link: #0b62c4; --vscode-separator: #d1d1d1;
+  }
+  body.theme-dark.text-soft { --text: #333333; --vscode-text: #333333; --link: #4183c4; }
 }

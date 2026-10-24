@@ -84,7 +84,16 @@ namespace mdew
             // ほかのウィンドウで開いた・保存したファイルも、最近使ったファイルに出るよう、手前に来るたびに読み直す
             Activated += (s, e) =>
             {
-                if (null != m_webView.CoreWebView2) PostRecentFiles(AppSettings.Load());
+                if (null != m_webView.CoreWebView2)
+                {
+                    AppSettings latest = AppSettings.Load();
+                    PostRecentFiles(latest);
+                    // ほかのウィンドウ（別のプロセス）でテーマを変えた時も合わせる
+                    if (Theme.Normalize(latest.Theme) != Theme.Mode)
+                    {
+                        Theme.SetMode(latest.Theme);
+                    }
+                }
                 // キーボードの入力先を WebView2 に戻す。バージョン情報等のダイアログを閉じた後、入力先が WebView2 に戻らず、
                 // Alt+F 等のメニューのショートカットやメニューの外の文字入力が効かないことがあるため（メニューを開いている間は除く）
                 Dispatcher.BeginInvoke(new Action(() =>
@@ -103,6 +112,12 @@ namespace mdew
             }
             SourceInitialized += (s, e) => RestoreWindowPlacement();
             Closed += (s, e) => DeleteTempImages();
+            // 配色（ライト・ダーク。Theme.cs）：タイトルバーは表示する前に合わせる（ウィンドウが作られた時）。
+            // メニュー「表示」→「テーマ」・Windows の設定で変わった時も合わせ直す
+            SourceInitialized += (s, e) => Theme.Apply(this);
+            ApplyThemeBackground();
+            Theme.Changed += OnThemeChanged;
+            Closed += (s, e) => Theme.Changed -= OnThemeChanged;
         }
 
         /// <summary>WebView2 を準備して画面（web\index.html）を表示する。ブラウザのキャッシュの削除、
@@ -154,7 +169,27 @@ namespace mdew
                 // WebView2 側（ブラウザ・画面表示のプロセス）が異常終了した場合の記録
                 ErrorLog.Write($"WebView2 のプロセスが異常終了：種類={e.ProcessFailedKind} 理由={e.Reason} 終了コード={e.ExitCode} {e.ProcessDescription}", null);
             };
+            // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）
+            await core.AddScriptToExecuteOnDocumentCreatedAsync($"window.__mdewTheme = {JsonSerializer.Serialize(Theme.CreateMessage())};");
             core.Navigate($"https://{APP_HOST}/index.html");
+        }
+
+        /// <summary>配色（Theme.cs）が変わった時：背景と、画面側の配色を合わせ直す。</summary>
+        private void OnThemeChanged()
+        {
+            ApplyThemeBackground();
+            if (null != m_webView.CoreWebView2)
+            {
+                Post(Theme.CreateMessage());
+            }
+        }
+
+        /// <summary>画面を表示する前・読み込み中に見える背景（ウィンドウと WebView2）を、今の配色に合わせる。</summary>
+        private void ApplyThemeBackground()
+        {
+            System.Drawing.Color color = Theme.WebBackground;
+            m_webView.DefaultBackgroundColor = color;
+            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(color.R, color.G, color.B));
         }
 
         /// <summary>HTML 側へメッセージを送る（JSON にして postMessage する。web\js\main.js の host の message 参照）。</summary>
@@ -198,6 +233,8 @@ namespace mdew
             switch (cmd)
             {
                 case "ready":
+                    // 配色（ライト・ダーク。Theme.cs）
+                    Post(Theme.CreateMessage());
                     // 画面側の設定（Debug ビルドの時は、ステータスバーに停止・入力遅延の回数を表示する）
                     // 貼り付けた画像の一時フォルダ（他のアプリへコピーする時に、画像のファイルの場所にする）
                     Post(new { cmd = "init", debug = Program.IsDebugBuild, tempDir = m_tempImageDir });
@@ -206,6 +243,16 @@ namespace mdew
                     // すぐに書き始められるよう、編集領域にキーボードの入力先を移す
                     m_webView.Focus();
                     Post(new { cmd = "focus" });
+                    break;
+                case "setTheme":
+                    // メニュー「表示」→「テーマ」：選び方を保存して、すべてのウィンドウ・画面側に反映する（OnThemeChanged）
+                    {
+                        string mode = Theme.Normalize(root.GetProperty("mode").GetString());
+                        AppSettings themeSettings = AppSettings.Load();
+                        themeSettings.Theme = mode;
+                        themeSettings.Save();
+                        Theme.SetMode(mode);
+                    }
                     break;
                 case "open":
                     var ofd = new OpenFileDialog
@@ -780,7 +827,9 @@ namespace mdew
             };
             // 文字の色：画面側の文字の色（メニュー「表示」→「文字の色」。textColor）にそろえる。WebMenu.xaml の WebMenuText は
             // DynamicResource なので、このメニュー（とサブメニュー）の中だけ置き換わる。渡されなければ既定の色
-            System.Windows.Media.Brush textBrush = (System.Windows.Media.Brush)WebMenuStyles["WebMenuText"];
+            // 配色（ライト・ダーク）の色を入れる（Theme.cs。WebMenu.xaml の色は DynamicResource なので、このメニューの中だけ置き換わる）
+            Theme.ApplyMenu(menu);
+            System.Windows.Media.Brush textBrush = Theme.MenuTextBrush;
             if (a_msg.TryGetProperty("textColor", out JsonElement textColorElement) && JsonValueKind.String == textColorElement.ValueKind
                 && !string.IsNullOrWhiteSpace(textColorElement.GetString()))
             {
@@ -2172,6 +2221,8 @@ namespace mdew
         public static void Main(string[] a_args)
         {
             var app = new Application();
+            // 配色（ライト・ダーク）。すべてのウィンドウに、開いた時に色を入れる（Theme.cs）
+            Theme.Initialize(AppSettings.Load().Theme);
             // 想定外のエラーでアプリが落ちた時に原因を追えるよう、エラーの内容を記録する（ErrorLog 参照）
             app.DispatcherUnhandledException += (s, e) =>
             {

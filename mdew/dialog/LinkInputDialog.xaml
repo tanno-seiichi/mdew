@@ -11,7 +11,7 @@
         ShowInTaskbar="False"
         FontFamily="Yu Gothic UI, Meiryo UI, Segoe UI"
         FontSize="12"
-        Background="#FFFFFF">
+        Background="{DynamicResource DlgWindowBackground}">
     <Window.Resources>
         <ResourceDictionary>
         <ResourceDictionary.MergedDictionaries>
@@ -22,9 +22,9 @@
     </Window.Resources>
     <StackPanel Margin="22">
         <TextBlock Text="リンク先のURLを入力してください" Margin="0,0,0,16"
-                   Foreground="#1C1C1C" FontWeight="Bold"/>
+                   Foreground="{DynamicResource DlgText}" FontWeight="Bold"/>
 
-        <TextBlock Text="URL" Margin="0,0,0,4" Foreground="#555555"/>
+        <TextBlock Text="URL" Margin="0,0,0,4" Foreground="{DynamicResource DlgSubText}"/>
         <TextBox x:Name="m_urlBox" Margin="0,0,0,14" Padding="6,4"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

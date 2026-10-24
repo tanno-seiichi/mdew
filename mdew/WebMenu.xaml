@@ -11,7 +11,10 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- 文字の色（既定。メニューを開く時に、画面側の文字の色（メニュー「表示」→「文字の色」）で置き換える。Program.cs の ShowWebMenu） -->
+    <!-- 色（明るい配色の値）。ダークモードの時は、Theme.cs がメニューの Resources に同じ名前で暗い色を入れて置き換える
+         （ShowWebMenu。下の見た目は DynamicResource で使う）。色を足す・変える時は Theme.cs も直す -->
     <SolidColorBrush x:Key="WebMenuText" Color="#1C1C1C"/>
+    <SolidColorBrush x:Key="WebMenuBackground" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="WebMenuBorder" Color="#C8CCD1"/>
     <SolidColorBrush x:Key="WebMenuHighlight" Color="#E8F0FE"/>
     <SolidColorBrush x:Key="WebMenuCheck" Color="#0B62C4"/>
@@ -25,12 +28,12 @@
     <ControlTemplate x:Key="WebMenuPanel" TargetType="ContentControl">
         <Grid Margin="12">
             <!-- 影（枠と同じ形の要素に付ける。中身に付けると文字がぼやけるため） -->
-            <Border Background="White" CornerRadius="6">
+            <Border Background="{DynamicResource WebMenuBackground}" CornerRadius="6">
                 <Border.Effect>
                     <DropShadowEffect Color="Black" Direction="270" ShadowDepth="4" BlurRadius="16" Opacity="0.15"/>
                 </Border.Effect>
             </Border>
-            <Border Background="White" BorderBrush="{StaticResource WebMenuBorder}" BorderThickness="1" CornerRadius="6"
+            <Border Background="{DynamicResource WebMenuBackground}" BorderBrush="{DynamicResource WebMenuBorder}" BorderThickness="1" CornerRadius="6"
                     Padding="0,4" MinWidth="160">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
                     <ContentPresenter/>
@@ -66,11 +69,11 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="Check" Text="✓" Foreground="{StaticResource WebMenuCheck}" HorizontalAlignment="Center"
+                <TextBlock x:Name="Check" Text="✓" Foreground="{DynamicResource WebMenuCheck}" HorizontalAlignment="Center"
                            VerticalAlignment="Center" Visibility="Hidden"/>
                 <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
                 <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}" Margin="28,0,0,0"
-                           Foreground="{StaticResource WebMenuSub}" FontSize="12" VerticalAlignment="Center"/>
+                           Foreground="{DynamicResource WebMenuSub}" FontSize="12" VerticalAlignment="Center"/>
             </Grid>
         </Border>
         <ControlTemplate.Triggers>
@@ -78,11 +81,11 @@
                 <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
             </Trigger>
             <Trigger Property="IsHighlighted" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource WebMenuHighlight}"/>
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource WebMenuHighlight}"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Foreground" Value="{StaticResource WebMenuDisabled}"/>
-                <Setter TargetName="Gesture" Property="Foreground" Value="{StaticResource WebMenuDisabledSub}"/>
+                <Setter Property="Foreground" Value="{DynamicResource WebMenuDisabled}"/>
+                <Setter TargetName="Gesture" Property="Foreground" Value="{DynamicResource WebMenuDisabledSub}"/>
                 <Setter TargetName="Bd" Property="Background" Value="Transparent"/>
             </Trigger>
         </ControlTemplate.Triggers>
@@ -97,10 +100,10 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="Check" Text="✓" Foreground="{StaticResource WebMenuCheck}" HorizontalAlignment="Center"
+                <TextBlock x:Name="Check" Text="✓" Foreground="{DynamicResource WebMenuCheck}" HorizontalAlignment="Center"
                            VerticalAlignment="Center" Visibility="Hidden"/>
                 <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
-                <TextBlock x:Name="Arrow" Grid.Column="2" Text="▸" Margin="28,0,0,0" Foreground="{StaticResource WebMenuSub}"
+                <TextBlock x:Name="Arrow" Grid.Column="2" Text="▸" Margin="28,0,0,0" Foreground="{DynamicResource WebMenuSub}"
                            FontSize="12" VerticalAlignment="Center"/>
                 <!-- 開く位置（右クリックのメニューと同じく、サブメニューの枠を、親のメニューの枠と 2px 重ね、項目の上端の 5px 上に置く）。
                      基準のこの Grid は、項目の右の余白（16px）・上の余白（5px）の内側。サブメニューの外側には影の余白（12px）がある。
@@ -120,14 +123,14 @@
                 <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
             </Trigger>
             <Trigger Property="IsHighlighted" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource WebMenuHighlight}"/>
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource WebMenuHighlight}"/>
             </Trigger>
             <Trigger Property="IsSubmenuOpen" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource WebMenuHighlight}"/>
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource WebMenuHighlight}"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Foreground" Value="{StaticResource WebMenuDisabled}"/>
-                <Setter TargetName="Arrow" Property="Foreground" Value="{StaticResource WebMenuDisabledSub}"/>
+                <Setter Property="Foreground" Value="{DynamicResource WebMenuDisabled}"/>
+                <Setter TargetName="Arrow" Property="Foreground" Value="{DynamicResource WebMenuDisabledSub}"/>
                 <Setter TargetName="Bd" Property="Background" Value="Transparent"/>
             </Trigger>
         </ControlTemplate.Triggers>
@@ -152,7 +155,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="MenuItem">
                     <TextBlock Text="{TemplateBinding Header}" Padding="10,4,16,2" FontSize="12"
-                               Foreground="{StaticResource WebMenuSub}"/>
+                               Foreground="{DynamicResource WebMenuSub}"/>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -164,7 +167,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Separator">
-                    <Border Height="1" Margin="0,4" Background="{StaticResource WebMenuSeparatorLine}" SnapsToDevicePixels="True"/>
+                    <Border Height="1" Margin="0,4" Background="{DynamicResource WebMenuSeparatorLine}" SnapsToDevicePixels="True"/>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

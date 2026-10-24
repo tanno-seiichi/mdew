@@ -13,7 +13,7 @@
 //                {cmd:'copyHtml', html, text} / {cmd:'importImages', id, srcs} /
 //                {cmd:'tableSizeDialog'} / {cmd:'linkDialog'} /
 //                {cmd:'showMenu', name, x, y, items, buttons, keyboard, textColor} /
-//                {cmd:'confirmClose', files:[{path, markdown, images, current}]}
+//                {cmd:'confirmClose', files:[{path, markdown, images, current}]} / {cmd:'setTheme', mode}
 //   host → web : {cmd:'load', path, name, docBase, markdown} /
 //                {cmd:'saved', path, name, docBase, markdown, replacements} /
 //                {cmd:'imagePasted', id, url, alt} / {cmd:'error', message} / {cmd:'focus'} / {cmd:'init', debug, tempDir} /
@@ -23,7 +23,7 @@
 //                {cmd:'pdfExported', ok} / {cmd:'recentFiles', files, folders} / {cmd:'imagesImported', id, urls} /
 //                {cmd:'tableSize', rows, cols} / {cmd:'linkUrl', url} /
 //                {cmd:'menuSelected', id} / {cmd:'menuClosed', name} / {cmd:'menuSwitch', name, keyboard} /
-//                {cmd:'confirmClose'}
+//                {cmd:'confirmClose'} / {cmd:'theme', mode, dark, bg, fg, border, menuBg, menuFg, menuBorder, menuHover, menuHoverFg, menuSep}
 import { Editor, showMenu, closeMenu } from './editor.js';
 import { setJoinSoftBreaks, parseBlocks, renderBlock, imageSource } from './markdown.js';
 import { FolderView, pathKey } from './folder.js';
@@ -573,8 +573,6 @@ const folderView = new FolderView($('folder-tree'), {
   listDir,
   isDirty: isPathDirty,
 });
-$('folder-reopen').addEventListener('mousedown', (e) => e.preventDefault());
-$('folder-reopen').addEventListener('click', () => doOpenFolder());
 
 /**
  * ファイルを切り替える前に、今の文書の変更を破棄してよいか確認が要るか。フォルダを開いている時は、保存していない
@@ -631,10 +629,9 @@ function openRecentFolder(a_path) {
 }
 
 /**
- * メニュー「ファイル」→「フォルダを開く...」・フォルダビューの「…」ボタン：保存していない変更があれば確認してから、
- * フォルダを選ぶダイアログを出してもらう。
- * @param {boolean} [a_fromMenu] メニューからか（メニューからの時だけ、opensInNewWindow なら新しいウィンドウで開く。
- *   フォルダビューの「…」ボタンは、このウィンドウのフォルダを切り替える）
+ * メニュー「ファイル」→「フォルダを開く...」：保存していない変更があれば確認してから、フォルダを選ぶダイアログを出してもらう。
+ * @param {boolean} [a_fromMenu] メニューからか（メニューからの時は、opensInNewWindow なら新しいウィンドウで開く。
+ *   false の時は、このウィンドウのフォルダを切り替える）
  */
 function doOpenFolder(a_fromMenu = false) {
   if (a_fromMenu && opensInNewWindow()) { send({ cmd: 'openFolder', newWindow: true }); return; }
@@ -1217,6 +1214,10 @@ const commands = {
   docWidthFull: () => setFullWidth(true),
   docStyleGithub: () => setDocStyle('github'),
   docStyleVscode: () => setDocStyle('vscode'),
+  // テーマ（ライト・ダーク）は、ホストが決める（Windows の設定に合わせる時もあるため。Theme.cs）
+  themeSystem: () => send({ cmd: 'setTheme', mode: 'system' }),
+  themeLight: () => send({ cmd: 'setTheme', mode: 'light' }),
+  themeDark: () => send({ cmd: 'setTheme', mode: 'dark' }),
   textColorSharp: () => setTextColor('sharp'),
   textColorSoft: () => setTextColor('soft'),
   toggleSource: () => setSourceMode(!state.sourceMode),
@@ -1663,6 +1664,11 @@ const MENUS = {
       { label: '表示スタイル', heading: true },
       { label: 'GitHubスタイル', checked: 'github' === docStyle, cmd: 'docStyleGithub' },
       { label: 'VSCodeスタイル', checked: 'vscode' === docStyle, cmd: 'docStyleVscode' },
+      null,
+      { label: 'テーマ', heading: true },
+      { label: 'Windows の設定に合わせる', checked: 'system' === themeMode, cmd: 'themeSystem' },
+      { label: 'ライト', checked: 'light' === themeMode, cmd: 'themeLight' },
+      { label: 'ダーク', checked: 'dark' === themeMode, cmd: 'themeDark' },
     ],
   },
   help: {
@@ -1862,6 +1868,34 @@ window.addEventListener('keydown', (e) => {
   else if ('w' === k && !e.shiftKey) { e.preventDefault(); commands.close(); }
 });
 
+// ---- テーマ（ライト・ダーク。ホストの Theme.cs が決めて、theme で知らせる）---------------------------------
+/** ホストから届く配色の値と、それを入れる CSS の変数（app.css の body.theme-dark）。 */
+const THEME_VARS = {
+  bg: '--vs-bg', fg: '--vs-fg', border: '--vs-border',
+  menuBg: '--vs-menu-bg', menuFg: '--vs-menu-fg', menuBorder: '--vs-menu-border',
+  menuHover: '--vs-menu-hover', menuHoverFg: '--vs-menu-hover-fg', menuSep: '--vs-menu-sep',
+};
+/** 今のテーマの選び方（メニュー「表示」→「テーマ」の ✓。'system'：Windows の設定に合わせる、'light'、'dark'）。 */
+let themeMode = 'system';
+
+/**
+ * 配色を合わせる。暗い配色の時は body に theme-dark を付け、背景・文字・メニューの色をホストから届いた色にする
+ * （明るい配色の時は今までの見た目のまま）。
+ * @param {{mode?: string, dark: boolean, bg?: string, fg?: string}} a_theme ホストからの theme のメッセージ（色は #rrggbb）
+ */
+function applyTheme(a_theme) {
+  const style = document.documentElement.style;
+  for (const [name, cssVar] of Object.entries(THEME_VARS)) {
+    if (a_theme[name]) style.setProperty(cssVar, a_theme[name]);
+    else style.removeProperty(cssVar);
+  }
+  if (a_theme.mode) themeMode = a_theme.mode;
+  document.body.classList.toggle('theme-dark', !!a_theme.dark);
+}
+// 最初の配色：ホストが文書を作る時に入れておく（Program.cs の InitializeWebViewAsync）。画面が一瞬白く表示されない
+// よう、theme のメッセージを待たずに合わせる
+if (window.__mdewTheme) applyTheme(window.__mdewTheme);
+
 /**
  * ファイルを開くのを待っている要求があれば、結果を渡す。
  * @param {string|null} a_path 開いたファイルのパス
@@ -2003,6 +2037,9 @@ if (host) {
     } else if ('focus' === msg.cmd) {
       // 起動直後：ウィンドウが表示されたら、すぐに書き始められるよう編集領域にカーソルを置く
       editor.focus();
+    } else if ('theme' === msg.cmd) {
+      // 配色（起動時と、メニュー「表示」→「テーマ」・Windows の設定で変わった時に届く）
+      applyTheme(msg);
     } else if ('init' === msg.cmd) {
       // 起動直後：ホストの設定。Debug ビルドの時は、停止・入力遅延の回数を数えて表示する
       state.tempDir = msg.tempDir || null;
