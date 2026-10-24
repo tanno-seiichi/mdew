@@ -40,7 +40,7 @@
   <ItemGroup>
     <!-- NuGet のパッケージを追加・更新した時は、インストーラー側の msi\THIRD-PARTY-NOTICES.txt
          （バージョン・ライセンス文）と msi\File.wxs（同梱するファイル）も直す -->
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
   </ItemGroup>
 
   <!-- WebView2 の WinForms 用の DLL（Microsoft.Web.WebView2.WinForms.dll）は使わないので、参照・実行フォルダへのコピー・

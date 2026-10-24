@@ -5,7 +5,7 @@ mdew uses the following third-party software.
 Each is provided under its own license, reproduced below.
 
 ========================================================================
-Microsoft.Web.WebView2 (WebView2 SDK)  version 1.0.2903.40
+Microsoft.Web.WebView2 (WebView2 SDK)  version 1.0.4129.50
 https://www.nuget.org/packages/Microsoft.Web.WebView2
 ------------------------------------------------------------------------
 Files: Microsoft.Web.WebView2.Core.dll, Microsoft.Web.WebView2.Wpf.dll,
