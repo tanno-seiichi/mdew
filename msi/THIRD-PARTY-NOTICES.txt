@@ -1,5 +1,5 @@
 ﻿mdew Third Party Notices
-（mdew で使用しているサードパーティのソフトウェアと、そのライセンス）
+(The third-party software used in mdew, and their licenses)
 
 mdew uses the following third-party software.
 Each is provided under its own license, reproduced below.
@@ -43,7 +43,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------
-[NOTICE.txt]（パッケージに含まれている通知。そのまま掲載）
+[NOTICE.txt] (The notice included in the package, reproduced as is)
 ------------------------------------------------------------------------
 
 NOTICES AND INFORMATION
