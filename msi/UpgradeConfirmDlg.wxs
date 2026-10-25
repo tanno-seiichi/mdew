@@ -1,4 +1,14 @@
 ﻿<!--
+  This file is derived from WixUI_Minimal.wxs of the WiX Toolset
+  (https://github.com/wixtoolset/wix).
+
+  Copyright (c) .NET Foundation and contributors. All rights reserved.
+  Licensed under the Microsoft Reciprocal License (MS-RL).
+  See LICENSE-MS-RL.txt in this folder for full license information.
+
+  Unlike the rest of mdew (MIT License), this file is distributed under the MS-RL.
+-->
+<!--
   WixUI_Minimal をそのまま使うのをやめ、その中身を複製・改造した自前の UI
   "WixUI_MinimalUpgrade" を定義しています。
 

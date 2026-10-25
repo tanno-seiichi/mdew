@@ -24,6 +24,7 @@ Markdown エディタです。編集用とプレビュー用の画面が分か�
 - [PDF への書き出し](#pdf-への書き出し)
 - [ショートカット一覧](#ショートカット一覧)
 - [困ったときは](#困ったときは)
+- [ライセンス](#ライセンス)
 
 ## 起動
 
@@ -352,3 +353,9 @@ A4 縦の PDF を作って開きます。追加のソフトウェアやインタ
 - エラーが起きた時の記録は、`%LocalAppData%\mdew\error.log` に残ります。
 
 開発者向けの情報（ファイルの構成・作りなど）は、`doc\DESIGN.md` を参照してください。
+
+## ライセンス
+
+mdew は MIT License です（`LICENSE.txt`）。ただし、インストーラーのソースの `msi\UpgradeConfirmDlg.wxs` は、
+WiX Toolset の `WixUI_Minimal.wxs` を元に作ったものなので、Microsoft Reciprocal License（MS-RL）です
+（`msi\LICENSE-MS-RL.txt`）。mdew が使用している WebView2 のライセンスは `msi\THIRD-PARTY-NOTICES.txt` にあります。

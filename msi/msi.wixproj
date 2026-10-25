@@ -12,6 +12,7 @@
     <Content Include="License.rtf" />
     <Content Include="LICENSE.txt" />
     <Content Include="THIRD-PARTY-NOTICES.txt" />
+    <Content Include="LICENSE-MS-RL.txt" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\mdew\mdew.csproj" />
