@@ -37,6 +37,16 @@
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
+  <!-- 動作の記録：TraceLog を true にしてビルドすると（コンパイルスイッチ TRACE_LOG）、%LocalAppData%\mdew\error.log に
+       起動・終了と、起動にかかった時間（Program.cs の StartupTiming）を書く。既定は false（エラーが起きた時だけ書く。
+       エラーが無ければ error.log は作られない）。コマンドでは dotnet build -p:TraceLog=true でも有効にできる -->
+  <PropertyGroup>
+    <TraceLog Condition="'$(TraceLog)' == ''">false</TraceLog>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TraceLog)' == 'true'">
+    <DefineConstants>$(DefineConstants);TRACE_LOG</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- NuGet のパッケージを追加・更新した時は、インストーラー側の msi\THIRD-PARTY-NOTICES.txt
          （バージョン・ライセンス文）と msi\File.wxs（同梱するファイル）も直す -->

@@ -1704,7 +1704,9 @@ function showBarMenu(a_name, a_keyboard = false) {
     hostMenuItems = new Map();
     const buttons = [...document.querySelectorAll('#menubar > button')].map((b) => {
       const r = b.getBoundingClientRect();
-      return { name: barButtonName(b), left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      const name = barButtonName(b);
+      // menu：メニューを持つボタンか（ホスト側で、切り替え先がメニューの時は、キーボードの入力先を WebView2 に戻さない）
+      return { name, left: r.left, top: r.top, right: r.right, bottom: r.bottom, menu: !!MENUS[name] };
     });
     // textColor：メニューの文字の色を、画面の文字の色（メニュー「表示」→「文字の色」）にそろえる
     const textColorValue = getComputedStyle(document.body).getPropertyValue('--text').trim();
@@ -1817,9 +1819,11 @@ for (const [name, def] of Object.entries(MENUS)) {
     }
     showBarMenu(name);
   });
-  // 別のメニューが開いている時は、ボタンにマウスを乗せただけで、そのメニューに切り替える（Windows のメニューと同じ）
+  // 別のメニューが開いている時は、ボタンにマウスを乗せただけで、そのメニューに切り替える（Windows のメニューと同じ）。
+  // ホストのメニュー（WPF）を開いている時の切り替えは、ホスト側が menuSwitch で知らせてくるので、ここでは開かない
+  // （ここでも開くと、同じメニューを 2 回開くことになり、開いたメニューがすぐに閉じてしまうことがあるため）
   def.button.addEventListener('mouseenter', () => {
-    if ((openMenuName && openMenuName !== name) || barMenuMode) showBarMenu(name);
+    if ((!host && openMenuName && openMenuName !== name) || barMenuMode) showBarMenu(name);
   });
 }
 /** メニューを開いている間に、マウスをメニューを持たないボタン（「検索と置換」）へ移したか（その間にマウスを
@@ -2035,7 +2039,9 @@ if (host) {
         openWaiter = null;
       }
     } else if ('focus' === msg.cmd) {
-      // 起動直後：ウィンドウが表示されたら、すぐに書き始められるよう編集領域にカーソルを置く
+      // 起動直後：ウィンドウが表示されたら、すぐに書き始められるよう編集領域にカーソルを置く。
+      // 起動時のファイルの load の後に届くので、ここで画面を見せる（上の「起動」の app-ready 参照）
+      document.body.classList.add('app-ready');
       editor.focus();
     } else if ('theme' === msg.cmd) {
       // 配色（起動時と、メニュー「表示」→「テーマ」・Windows の設定で変わった時に届く）
@@ -2155,5 +2161,10 @@ window.__mdeTest = {
 // 起動時の引数のファイルがあれば load が届く）。ブラウザ単体の場合は、停止・入力遅延の回数も表示する。
 loadDocument('');
 updateTitle();
+// 前回の表示を復元し終えたので、画面を見せる（それまでは app.css の body:not(.app-ready) で隠している。起動直後に、
+// 既定の表示（アウトラインを表示等）が一瞬見えてから前回の表示に切り替わる、ちらつきを防ぐ）。
+// ホストがある時は、起動時のファイルを表示し終えてから（ホストから focus が届いた時）見せる（メニューバーだけが先に
+// 見えてから文書が出る、2 段階の表示にならないように）
+if (!host) document.body.classList.add('app-ready');
 send({ cmd: 'ready' });
 if (!host) startStallMonitor();

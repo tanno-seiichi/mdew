@@ -428,3 +428,11 @@ body.theme-dark #statusbar .status-btn:hover { border-color: var(--line); }
   }
   body.theme-dark.text-soft { --text: #333333; --vscode-text: #333333; --link: #4183c4; }
 }
+
+/* 起動直後のちらつきを防ぐ：main.js が前回の表示（アウトライン・ステータスバーの表示・非表示、アウトラインの幅、配色、
+   表示スタイル、表示倍率等）を復元し終えて body に app-ready を付けるまで、画面の中身を見せない。それまでは背景を透明にして、
+   ホストが配色に合わせて設定した WebView2 の背景色（Program.cs の ApplyThemeBackground）を見せる。
+   main.js の読み込みに失敗した時も操作できなくならないよう、1.5 秒たったら表示する（app-reveal） */
+html body:not(.app-ready) { background: transparent; }
+html body:not(.app-ready) > * { visibility: hidden; animation: app-reveal 0s 1.5s forwards; }
+@keyframes app-reveal { to { visibility: visible; } }

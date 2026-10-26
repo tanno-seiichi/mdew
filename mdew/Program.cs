@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.IO;
 using System.Reflection;
+using System.Runtime;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -61,6 +62,11 @@ namespace mdew
         private readonly bool m_startupMaximized;
         /// <summary>次回起動時に引き継ぐ設定（ウィンドウの位置・サイズ等）。</summary>
         private readonly AppSettings m_settings = AppSettings.Load();
+        /// <summary>WebView2 の環境（裏で動く Edge のプロセス）を作る処理。起動を速くするため、ウィンドウを作る時に
+        /// 始めておき、ウィンドウの表示と並行して進める（InitializeWebViewAsync で終わるのを待つ）。</summary>
+        private readonly System.Threading.Tasks.Task<CoreWebView2Environment> m_webViewEnvironment;
+        /// <summary>起動時引数のファイルを開いて、画面に表示されるのを待っているところか（起動時間の記録用。StartupTiming 参照）。</summary>
+        private bool m_startupLoadPending;
         /// <summary>このウィンドウ専用の、貼り付けた画像の一時フォルダ（閉じる時に削除する）。</summary>
         private readonly string m_tempImageDir = Path.Combine(Path.GetTempPath(), Program.AssemblyName, Guid.NewGuid().ToString("N"));
 
@@ -69,6 +75,14 @@ namespace mdew
         /// <param name="a_placement">起動時引数 --placement= の値（「新規」で開いた時だけ。無ければ null）。</param>
         public MainWindow(string a_startupPath, string a_placement)
         {
+            // WebView2 の環境を作り始める（時間がかかるので、ウィンドウの作成・表示と並行して進める）
+            m_webViewEnvironment = CreateWebViewEnvironmentAsync();
+            ContentRendered += (s, e) => { StartupTiming.Mark("ウィンドウ表示"); };
+            // 起動直後に、ウィンドウの中が一瞬白く見えないようにする：ウィンドウを開いた直後は、WPF が最初の描画を終えるまで
+            // 中身が白いまま表示される（ダークテーマの時に目立つ）。そこで、最初の描画が終わるまでウィンドウを隠しておく
+            // （DWM のクローク。ウィンドウとしては表示されたままで、画面に映らないだけ）
+            SourceInitialized += (s, e) => SetCloak(true);
+            ContentRendered += (s, e) => SetCloak(false);
             m_startupPath = ResolveStartupPath(a_startupPath);
             m_startupBounds = ParsePlacement(a_placement, out m_startupMaximized);
             Title = $"{Program.AppName} v{Program.Version}";
@@ -120,22 +134,61 @@ namespace mdew
             Closed += (s, e) => Theme.Changed -= OnThemeChanged;
         }
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr a_window, int a_attribute, ref int a_value, int a_size);
+
+        /// <summary>DwmSetWindowAttribute の DWMWA_CLOAK（ウィンドウを画面に映さない）。</summary>
+        private const int DWMWA_CLOAK = 13;
+
+        /// <summary>ウィンドウを画面に映さない・映す（DWM のクローク。起動直後の白い画面を見せないため。コンストラクター参照）。
+        /// 使えない環境では何もしない（白い画面が一瞬見えるだけ）。</summary>
+        /// <param name="a_cloak">映さないなら true。</param>
+        private void SetCloak(bool a_cloak)
+        {
+            IntPtr handle = new WindowInteropHelper(this).Handle;
+            if (IntPtr.Zero == handle)
+            {
+                return;
+            }
+            int value = a_cloak ? 1 : 0;
+            DwmSetWindowAttribute(handle, DWMWA_CLOAK, ref value, sizeof(int));
+        }
+
+        /// <summary>WebView2 の環境を作る（裏で Edge のプロセスが起動する）。WebView2 の作業用のデータ（キャッシュ・
+        /// localStorage 等）は %LOCALAPPDATA%\&lt;アセンブリ名&gt;\WebView2 に置く。</summary>
+        /// <returns>作った環境。</returns>
+        private static async System.Threading.Tasks.Task<CoreWebView2Environment> CreateWebViewEnvironmentAsync()
+        {
+            string userData = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "WebView2");
+            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, userData);
+            StartupTiming.Mark("WebView2の環境");
+            return env;
+        }
+
         /// <summary>WebView2 を準備して画面（web\index.html）を表示する。ブラウザのキャッシュの削除、
         /// 仮想ホスト名の設定、HTML 側とのメッセージ・画像の要求・クリップボードの許可の受け付けを行う。</summary>
         /// <returns>準備が終わるまでの非同期処理。</returns>
         private async System.Threading.Tasks.Task InitializeWebViewAsync()
         {
-            // WebView2 の作業用のデータ（キャッシュ・localStorage 等）は %LOCALAPPDATA%\<アセンブリ名>\WebView2 に置く
-            string userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "WebView2");
-            var env = await CoreWebView2Environment.CreateAsync(null, userData);
+            // 環境は、ウィンドウを作った時に作り始めている（CreateWebViewEnvironmentAsync）
+            var env = await m_webViewEnvironment;
             await m_webView.EnsureCoreWebView2Async(env);
+            StartupTiming.Mark("WebView2の準備");
             var core = m_webView.CoreWebView2;
 
             // 画面側（web フォルダ）のファイルを更新した時に、前回読み込んだ古いファイルがブラウザの
-            // キャッシュから使われてしまわないよう、起動のたびにキャッシュを消す。
-            await core.Profile.ClearBrowsingDataAsync(
-                CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage);
+            // キャッシュから使われてしまわないよう、キャッシュを消す。消すのは、web フォルダのファイル・mdew.dll が
+            // 前回消した時から変わった時だけ（起動のたびに消すと、その分起動が遅くなるため。WebCacheStamp 参照）
+            string webDir = Path.Combine(AppContext.BaseDirectory, "web");
+            string stamp = WebCacheStamp.Create(webDir);
+            if (WebCacheStamp.IsChanged(stamp))
+            {
+                await core.Profile.ClearBrowsingDataAsync(
+                    CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage);
+                WebCacheStamp.Save(stamp);
+                StartupTiming.Mark("キャッシュ削除");
+            }
 
             // Ctrl+R での再読み込み等で編集中の内容が消えないよう、ブラウザ用のショートカットは無効にする。
             // （F12・Ctrl+Shift+I の開発者ツールも無効になるため、F12 は HTML 側から devTools で開く）
@@ -145,7 +198,6 @@ namespace mdew
             // （web\js\main.js の setZoom）
             core.Settings.IsZoomControlEnabled = false;
 
-            string webDir = Path.Combine(AppContext.BaseDirectory, "web");
             core.SetVirtualHostNameToFolderMapping(APP_HOST, webDir, CoreWebView2HostResourceAccessKind.Allow);
             // 文書内の画像（相対パス）は https://doc.mdew/<世代>/<相対パス> として要求されるので、
             // 開いているファイルのフォルダから読んで返す（ServeDocumentResource 参照）。
@@ -153,7 +205,16 @@ namespace mdew
             core.AddWebResourceRequestedFilter($"https://{TMP_HOST}/*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += ServeDocumentResource;
             // タイトルバー：HTML 側のタイトル（「* ファイル名」）の後ろに、アプリ名とバージョンを付ける
-            core.DocumentTitleChanged += (s, e) => Title = $"{core.DocumentTitle} - {Program.AppName} v{Program.Version}";
+            core.DocumentTitleChanged += (s, e) =>
+            {
+                Title = $"{core.DocumentTitle} - {Program.AppName} v{Program.Version}";
+                // 起動時引数のファイルを表示し終えた（画面側は、文書を表示した後にタイトルを変える。main.js の load）
+                if (m_startupLoadPending)
+                {
+                    m_startupLoadPending = false;
+                    StartupTiming.Finish("ファイル表示");
+                }
+            };
             core.WebMessageReceived += OnWebMessage;
             // 右クリックのメニューの「貼り付け」で、画面側からクリップボードを読めるようにする
             // （許可しないと、読み取るたびに確認の表示が出る。web\js\editor.js の pasteFromClipboard 参照）
@@ -233,6 +294,7 @@ namespace mdew
             switch (cmd)
             {
                 case "ready":
+                    StartupTiming.Mark("画面の準備");
                     // 配色（ライト・ダーク。Theme.cs）
                     Post(Theme.CreateMessage());
                     // 画面側の設定（Debug ビルドの時は、ステータスバーに停止・入力遅延の回数を表示する）
@@ -240,6 +302,11 @@ namespace mdew
                     Post(new { cmd = "init", debug = Program.IsDebugBuild, tempDir = m_tempImageDir });
                     PostRecentFiles(AppSettings.Load());
                     OpenStartupPath();
+                    if (!m_startupLoadPending)
+                    {
+                        // 開くファイルが無い（または開けなかった）時は、ここまでを起動時間として記録する
+                        StartupTiming.Finish("ファイル無し");
+                    }
                     // すぐに書き始められるよう、編集領域にキーボードの入力先を移す
                     m_webView.Focus();
                     Post(new { cmd = "focus" });
@@ -803,18 +870,24 @@ namespace mdew
         /// buttons：メニューバーのボタンの名前と位置、keyboard：キーボードで開いたか）。</param>
         private void ShowWebMenu(JsonElement a_msg)
         {
+            string name = a_msg.GetProperty("name").GetString();
             if (null != m_webMenu)
             {
-                m_webMenu.IsOpen = false;
+                // 開いているメニューは、新しいメニューに置き換える。置き換えて閉じたメニューは、キーボードの入力先を WebView2 に
+                // 戻さない（Tag に置き換え先のメニューの名前を入れておく。menu.Closed 参照）
+                System.Windows.Controls.ContextMenu old = m_webMenu;
+                m_webMenu = null;
+                old.Tag = name;
+                old.IsOpen = false;
             }
-            string name = a_msg.GetProperty("name").GetString();
-            var buttons = new System.Collections.Generic.List<(string Name, Rect Bounds)>();
+            var buttons = new System.Collections.Generic.List<(string Name, Rect Bounds, bool HasMenu)>();
             foreach (JsonElement b in a_msg.GetProperty("buttons").EnumerateArray())
             {
                 double left = b.GetProperty("left").GetDouble();
                 double top = b.GetProperty("top").GetDouble();
+                bool hasMenu = b.TryGetProperty("menu", out JsonElement menuElement) && JsonValueKind.True == menuElement.ValueKind;
                 buttons.Add((b.GetProperty("name").GetString(),
-                    new Rect(left, top, b.GetProperty("right").GetDouble() - left, b.GetProperty("bottom").GetDouble() - top)));
+                    new Rect(left, top, b.GetProperty("right").GetDouble() - left, b.GetProperty("bottom").GetDouble() - top), hasMenu));
             }
             // 枠の外側の影の余白の分、左上へずらして、枠が指定の位置に来るようにする
             var menu = new System.Windows.Controls.ContextMenu
@@ -861,7 +934,7 @@ namespace mdew
             menu.PreviewMouseMove += (s, e) =>
             {
                 Point p = e.GetPosition(m_webView);
-                foreach (var (buttonName, bounds) in buttons)
+                foreach (var (buttonName, bounds, _) in buttons)
                 {
                     if (buttonName != name && bounds.Contains(p))
                     {
@@ -897,13 +970,29 @@ namespace mdew
             }
             menu.Closed += (s, e) =>
             {
+                if (menu.Tag is string replacedBy)
+                {
+                    // 別のメニューを開くために閉じた（ShowWebMenu で置き換えた）：キーボードの入力先は WebView2 に戻さない。
+                    // 戻すと、WebView2 への入力先の移動が後から届いて、開いたばかりのメニューが閉じてしまうことがあるため。
+                    // 同じメニューを開き直した時は、画面側のメニューの状態（開いているメニュー）を消さないよう、menuClosed も送らない
+                    if (replacedBy != name)
+                    {
+                        Post(new { cmd = "menuClosed", name });
+                    }
+                    return;
+                }
                 if (ReferenceEquals(m_webMenu, menu))
                 {
                     m_webMenu = null;
                 }
-                // キーボードの入力先を WebView2 に戻す（別のメニューに切り替える場合は、ShowWebMenu で再び移す。
-                // 「検索と置換」のようにメニューを持たないボタンへ切り替える場合は、画面側でそのボタンを選んだ状態にする）
-                m_webView.Focus();
+                // キーボードの入力先を WebView2 に戻す。ただし、別のメニューに切り替える時は戻さない（すぐに次のメニューを
+                // 開いて、ShowWebMenu で入力先を移すため。戻すと、上と同じく次のメニューが閉じてしまうことがある）。
+                // 「検索と置換」のようにメニューを持たないボタンへ切り替える時は戻す（画面側でそのボタンを選んだ状態にする）
+                bool switchToMenu = null != switchTo && buttons.Exists(b => b.Name == switchTo && b.HasMenu);
+                if (!switchToMenu)
+                {
+                    m_webView.Focus();
+                }
                 Post(new { cmd = "menuClosed", name });
                 if (null != switchTo)
                 {
@@ -1448,6 +1537,8 @@ namespace mdew
                 MessageBox.Show(this, $"起動時に指定されたファイルが見つかりません。\n{path}",
                     Program.AppName, MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+            // ファイルを開けた時は、画面に表示し終えた時（DocumentTitleChanged）に起動時間を記録する
+            m_startupLoadPending = null != m_currentPath;
         }
 
         /// <summary>リンク先の URL を、既定のブラウザ・メールソフトで開く。誤ってプログラム等を実行しないよう、
@@ -2159,13 +2250,141 @@ namespace mdew
         }
     }
 
+    /// <summary>起動にかかった時間（プロセスの開始からの時間）を測り、error.log に 1 行で記録する（起動を速くするための確認用）。
+    /// 例：「起動時間：Main=80ms ウィンドウ表示=310ms WebView2の環境=350ms WebView2の準備=520ms 画面の準備=700ms ファイル表示=730ms」
+    ///   Main：.NET の起動が終わり、mdew の処理が始まった
+    ///   ウィンドウ表示：ウィンドウが最初に表示された
+    ///   WebView2の環境：裏で動く Edge のプロセスが起動した
+    ///   WebView2の準備：ウィンドウの中の WebView2 が使えるようになった
+    ///   キャッシュ削除：web フォルダのファイルが更新されていたので、ブラウザのキャッシュを消した（消さなかった時は出ない）
+    ///   画面の準備：画面側（web\index.html・js）の準備ができた（ready）
+    ///   ファイル表示：起動時引数のファイルを画面に表示した（ファイル無し：開くファイルが無かった）</summary>
+    public static class StartupTiming
+    {
+        /// <summary>プロセスの開始日時。</summary>
+        private static readonly DateTime s_processStart = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+        /// <summary>記録した時間（「名前=時間ms」を空白区切りで並べたもの）。</summary>
+        private static readonly StringBuilder s_marks = new StringBuilder();
+        /// <summary>記録し終えたか（2 回目以降の Mark・Finish は何もしない）。</summary>
+        private static bool s_finished;
+
+        /// <summary>今の時点の、プロセスの開始からの時間を覚えておく（TRACE_LOG の時だけ。それ以外は呼び出しごと無くなる）。</summary>
+        /// <param name="a_name">時点の名前。</param>
+        [System.Diagnostics.Conditional("TRACE_LOG")]
+        public static void Mark(string a_name)
+        {
+            lock (s_marks)
+            {
+                if (!s_finished)
+                {
+                    s_marks.Append($" {a_name}={(DateTime.Now - s_processStart).TotalMilliseconds:0}ms");
+                }
+            }
+        }
+
+        /// <summary>今の時点を最後の時点として覚え、それまでの時間を error.log に記録する（TRACE_LOG の時だけ）。</summary>
+        /// <param name="a_name">時点の名前。</param>
+        [System.Diagnostics.Conditional("TRACE_LOG")]
+        public static void Finish(string a_name)
+        {
+            string text;
+            lock (s_marks)
+            {
+                if (s_finished)
+                {
+                    return;
+                }
+                s_marks.Append($" {a_name}={(DateTime.Now - s_processStart).TotalMilliseconds:0}ms");
+                s_finished = true;
+                text = s_marks.ToString();
+            }
+            ErrorLog.Trace($"起動時間：{text.TrimStart()}");
+        }
+    }
+
+    /// <summary>ブラウザのキャッシュを消すかどうかを決めるための印（web フォルダのファイル・mdew.dll の更新日時と、
+    /// アプリのバージョン）。前回キャッシュを消した時の印を %LOCALAPPDATA%\&lt;アセンブリ名&gt;\webcache.stamp に置き、
+    /// 今の印と違う時（web フォルダのファイルを更新した・別のバージョンをインストールした・Debug と Release を切り替えた時等）
+    /// だけキャッシュを消す。</summary>
+    public static class WebCacheStamp
+    {
+        /// <summary>前回キャッシュを消した時の印を置くファイルのパス。</summary>
+        private static readonly string s_path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "webcache.stamp");
+
+        /// <summary>今の印を作る。</summary>
+        /// <param name="a_webDir">web フォルダのパス。</param>
+        /// <returns>印（作れなかった時は null。その時は毎回キャッシュを消す）。</returns>
+        public static string Create(string a_webDir)
+        {
+            try
+            {
+                long newest = File.GetLastWriteTimeUtc(typeof(Program).Assembly.Location).Ticks;
+                foreach (string file in Directory.EnumerateFiles(a_webDir, "*", SearchOption.AllDirectories))
+                {
+                    newest = Math.Max(newest, File.GetLastWriteTimeUtc(file).Ticks);
+                }
+                return $"{Program.Version} {AppContext.BaseDirectory} {newest}";
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>前回キャッシュを消した時から、印が変わったか。</summary>
+        /// <param name="a_stamp">今の印（Create）。</param>
+        /// <returns>変わった（または分からない）なら true（キャッシュを消す）。</returns>
+        public static bool IsChanged(string a_stamp)
+        {
+            try
+            {
+                return null == a_stamp || !File.Exists(s_path) || a_stamp != File.ReadAllText(s_path);
+            }
+            catch (Exception)
+            {
+                return true;
+            }
+        }
+
+        /// <summary>キャッシュを消した時の印を保存する。</summary>
+        /// <param name="a_stamp">今の印（Create）。</param>
+        public static void Save(string a_stamp)
+        {
+            if (null == a_stamp)
+            {
+                return;
+            }
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(s_path));
+                File.WriteAllText(s_path, a_stamp);
+            }
+            catch (Exception)
+            {
+                // 保存できなくても、次回もキャッシュを消すだけ
+            }
+        }
+    }
+
     /// <summary>エラー・起動・終了の記録。%LOCALAPPDATA%\&lt;アセンブリ名&gt;\error.log に追記する（1MB を超えたら作り直す）。
-    /// 「起動」の次に「終了」が無い記録は、そのとき異常終了（強制終了を含む）したことを表す。</summary>
+    /// 起動・終了・起動時間の記録は、コンパイルスイッチ TRACE_LOG の時だけ（Trace）。エラーが無ければ error.log は作らない。
+    /// 「起動」の次に「終了」が無い記録は、そのとき異常終了（強制終了を含む）したことを表す（TRACE_LOG の時）。</summary>
     public static class ErrorLog
     {
         /// <summary>記録するファイルのパス。</summary>
         public static readonly string FilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "error.log");
+
+        /// <summary>動作の記録（起動・終了等。エラーではないもの）を 1 件記録する。コンパイルスイッチ TRACE_LOG を有効にして
+        /// ビルドした時だけ記録する（mdew.csproj の TraceLog。無効の時は、呼び出しごと無くなる）。エラーが無ければ error.log を
+        /// 作らないようにするため。</summary>
+        /// <param name="a_message">内容。</param>
+        [System.Diagnostics.Conditional("TRACE_LOG")]
+        public static void Trace(string a_message)
+        {
+            Write(a_message, null);
+        }
 
         /// <summary>1 件記録する（日時・プロセス番号・内容）。記録できなくても例外は出さない。</summary>
         /// <param name="a_message">内容。</param>
@@ -2220,6 +2439,20 @@ namespace mdew
         [STAThread]
         public static void Main(string[] a_args)
         {
+            StartupTiming.Mark("Main");
+            // 起動を速くする：前回の起動で JIT コンパイルしたメソッドを記録しておき、次回の起動では、それを別のスレッドで
+            // 先にコンパイルしておく（.NET のマルチコア JIT。記録は %LOCALAPPDATA%\<アセンブリ名>\startup.jitprofile）
+            try
+            {
+                string profileDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AssemblyName);
+                Directory.CreateDirectory(profileDir);
+                ProfileOptimization.SetProfileRoot(profileDir);
+                ProfileOptimization.StartProfile("startup.jitprofile");
+            }
+            catch (Exception)
+            {
+                // 使えなくても動作には影響しない（起動が速くならないだけ）
+            }
             var app = new Application();
             // 配色（ライト・ダーク）。すべてのウィンドウに、開いた時に色を入れる（Theme.cs）
             Theme.Initialize(AppSettings.Load().Theme);
@@ -2255,8 +2488,9 @@ namespace mdew
                         mainWindow.OpenReadme();
                     }
                 }));
-            ErrorLog.Write($"起動（v{Version}）", null);
-            app.Exit += (s, e) => ErrorLog.Write($"終了（終了コード={e.ApplicationExitCode}）", null);
+            // 起動・終了の記録（TRACE_LOG の時だけ。ErrorLog.Trace）
+            ErrorLog.Trace($"起動（v{Version}）");
+            app.Exit += (s, e) => { ErrorLog.Trace($"終了（終了コード={e.ApplicationExitCode}）"); };
             // 起動時引数：開くファイルのパスと、「新規」で開いた時のウィンドウの位置（--placement=）
             string path = null;
             string placement = null;

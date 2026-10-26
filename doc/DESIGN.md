@@ -123,3 +123,33 @@ Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js �
 
 `web\app.css` の先頭の `:root { … }` にまとめてあります（`--doc-font`・`--doc-font-size` 等）。
 書き換えてビルドし直すと反映されます。
+
+## 起動時間
+
+起動を速くするため、次のようにしています（`Program.cs`）。
+
+- WebView2 の環境（裏で動く Edge のプロセス）は、ウィンドウを作る時に作り始め、ウィンドウの表示と並行して進めます
+  （`MainWindow.CreateWebViewEnvironmentAsync`）。
+- ブラウザのキャッシュは、web フォルダのファイル・mdew.dll が前回消した時から変わった時だけ消します（`WebCacheStamp`。
+  前回の印は `%LocalAppData%\mdew\webcache.stamp`）。web フォルダのファイルを書き換えても、古いファイルが使われることはありません。
+- .NET のマルチコア JIT（`ProfileOptimization`）を使います。前回の起動でコンパイルしたメソッドを
+  `%LocalAppData%\mdew\startup.jitprofile` に記録しておき、次回の起動では別のスレッドで先にコンパイルします（2 回目の起動から効きます）。
+
+`mdew.csproj` の `TraceLog` を `true` にしてビルドすると（コンパイルスイッチ `TRACE_LOG`）、起動にかかった時間を、
+起動のたびに `%LocalAppData%\mdew\error.log` に 1 行で記録します（`StartupTiming`。起動・終了の記録も書きます）。
+時間は、どれもプロセスの開始からの時間です。既定は `false` で、error.log にはエラーだけを書きます（エラーが無ければ
+error.log は作られません）。
+
+```
+起動時間：Main=80ms ウィンドウ表示=310ms WebView2の環境=350ms WebView2の準備=520ms 画面の準備=700ms ファイル表示=730ms
+```
+
+| 名前 | 時点 |
+|---|---|
+| Main | .NET の起動が終わり、mdew の処理が始まった |
+| ウィンドウ表示 | ウィンドウが最初に表示された |
+| WebView2の環境 | 裏で動く Edge のプロセスが起動した |
+| WebView2の準備 | ウィンドウの中の WebView2 が使えるようになった |
+| キャッシュ削除 | web フォルダのファイルが更新されていたので、キャッシュを消した（消さなかった時は出ない） |
+| 画面の準備 | 画面側（`web\index.html`・js）の準備ができた |
+| ファイル表示 | 起動時引数のファイルを画面に表示した（開くファイルが無い時は「ファイル無し」） |
