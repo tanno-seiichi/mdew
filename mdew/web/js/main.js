@@ -30,6 +30,9 @@ import { FolderView, pathKey } from './folder.js';
 import { FindEngine } from './find.js';
 import { setHostClipboardWriter } from './clipboard.js';
 
+/** main.js の実行が始まった時間（読み込み開始からの ms。import した js のファイルの実行が終わった後）。起動時間の記録用。 */
+const MAIN_START = performance.now();
+
 /** ホスト（WebView2）とのやり取りの窓口。ブラウザ単体で開いた場合（動作確認用）は null。 */
 const host = window.chrome?.webview ?? null;
 
@@ -2156,6 +2159,19 @@ window.__mdeTest = {
   editor,
 };
 
+/**
+ * 画面の読み込みの各時点（ホストの起動時間の記録用。Program.cs の MarkWebTiming。記録するのは TRACE_LOG の時だけ）。
+ * @returns {{origin: number, html: number, css: number, js: number, main: number}} origin：読み込み開始の時刻
+ *   （1970-01-01 からの ms）、ほか：そこからの時間（ms。html：index.html、css：app.css、js：js のファイルをすべて読み終えた、
+ *   main：main.js の実行が始まった）
+ */
+function startupTiming() {
+  const nav = performance.getEntriesByType('navigation')[0];
+  const resources = performance.getEntriesByType('resource');
+  const lastEnd = (a_ext) => Math.max(0, ...resources.filter((r) => r.name.split('?')[0].endsWith(a_ext)).map((r) => r.responseEnd));
+  return { origin: performance.timeOrigin, html: nav ? nav.responseEnd : 0, css: lastEnd('.css'), js: lastEnd('.js'), main: MAIN_START };
+}
+
 // ---- 起動 -----------------------------------------------------------------
 // 空の文書を表示してから、ホストに準備ができたことを知らせる（ホストから init が届き、
 // 起動時の引数のファイルがあれば load が届く）。ブラウザ単体の場合は、停止・入力遅延の回数も表示する。
@@ -2166,5 +2182,5 @@ updateTitle();
 // ホストがある時は、起動時のファイルを表示し終えてから（ホストから focus が届いた時）見せる（メニューバーだけが先に
 // 見えてから文書が出る、2 段階の表示にならないように）
 if (!host) document.body.classList.add('app-ready');
-send({ cmd: 'ready' });
+send({ cmd: 'ready', timing: startupTiming() });
 if (!host) startStallMonitor();

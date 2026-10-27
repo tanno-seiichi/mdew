@@ -170,6 +170,29 @@ namespace mdew
             return new IntPtr(1);
         }
 
+        /// <summary>画面側から ready で届いた、画面の読み込みの各時点（main.js の startupTiming）を、起動時間の記録に加える
+        /// （TRACE_LOG の時だけ。StartupTiming）。</summary>
+        /// <param name="a_msg">ready のメッセージ（timing：origin（読み込み開始の時刻。1970-01-01 からの ms）と、そこからの
+        /// html・css・js・main の時間（ms））。</param>
+        [System.Diagnostics.Conditional("TRACE_LOG")]
+        private static void MarkWebTiming(JsonElement a_msg)
+        {
+            if (!a_msg.TryGetProperty("timing", out JsonElement timing) || JsonValueKind.Object != timing.ValueKind ||
+                !timing.TryGetProperty("origin", out JsonElement originElement) || JsonValueKind.Number != originElement.ValueKind)
+            {
+                return;
+            }
+            double origin = originElement.GetDouble();
+            StartupTiming.MarkAt("画面の読み込み開始", origin);
+            foreach ((string key, string name) in new[] { ("html", "HTML"), ("css", "CSS"), ("js", "js"), ("main", "main.js開始") })
+            {
+                if (timing.TryGetProperty(key, out JsonElement value) && JsonValueKind.Number == value.ValueKind && value.GetDouble() > 0)
+                {
+                    StartupTiming.MarkAt(name, origin + value.GetDouble());
+                }
+            }
+        }
+
         /// <summary>WebView2 の環境を作る（裏で Edge のプロセスが起動する）。WebView2 の作業用のデータ（キャッシュ・
         /// localStorage 等）は %LOCALAPPDATA%\&lt;アセンブリ名&gt;\WebView2 に置く。</summary>
         /// <returns>作った環境。</returns>
@@ -198,8 +221,9 @@ namespace mdew
             // 前回消した時から変わった時だけ（起動のたびに消すと、その分起動が遅くなるため。WebCacheStamp 参照）
             string webDir = Path.Combine(AppContext.BaseDirectory, "web");
             string stamp = WebCacheStamp.Create(webDir);
-            if (WebCacheStamp.IsChanged(stamp))
+            if (WebCacheStamp.IsChanged(stamp, out string cacheReason))
             {
+                ErrorLog.Trace($"ブラウザのキャッシュを削除：{cacheReason}");
                 await core.Profile.ClearBrowsingDataAsync(
                     CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage);
                 WebCacheStamp.Save(stamp);
@@ -248,6 +272,7 @@ namespace mdew
             };
             // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）
             await core.AddScriptToExecuteOnDocumentCreatedAsync($"window.__mdewTheme = {JsonSerializer.Serialize(Theme.CreateMessage())};");
+            StartupTiming.Mark("画面の読み込みの指示");
             core.Navigate($"https://{APP_HOST}/index.html");
         }
 
@@ -310,6 +335,7 @@ namespace mdew
             switch (cmd)
             {
                 case "ready":
+                    MarkWebTiming(root);
                     StartupTiming.Mark("画面の準備");
                     // 配色（ライト・ダーク。Theme.cs）
                     Post(Theme.CreateMessage());
@@ -2273,14 +2299,19 @@ namespace mdew
     ///   WebView2の環境：裏で動く Edge のプロセスが起動した
     ///   WebView2の準備：ウィンドウの中の WebView2 が使えるようになった
     ///   キャッシュ削除：web フォルダのファイルが更新されていたので、ブラウザのキャッシュを消した（消さなかった時は出ない）
+    ///   画面の読み込みの指示：WebView2 に画面（web\index.html）を読み込むよう指示した
+    ///   画面の読み込み開始：画面側が読み込みを始めた（以下、画面側の時刻。MainWindow.MarkWebTiming）
+    ///   HTML：index.html を読み終えた　CSS：app.css を読み終えた　js：js のファイルをすべて読み終えた
+    ///   main.js開始：main.js の実行が始まった（読み込んだ js のファイルの実行が終わった）
     ///   画面の準備：画面側（web\index.html・js）の準備ができた（ready）
     ///   ファイル表示：起動時引数のファイルを画面に表示した（ファイル無し：開くファイルが無かった）</summary>
     public static class StartupTiming
     {
         /// <summary>プロセスの開始日時。</summary>
         private static readonly DateTime s_processStart = System.Diagnostics.Process.GetCurrentProcess().StartTime;
-        /// <summary>記録した時間（「名前=時間ms」を空白区切りで並べたもの）。</summary>
-        private static readonly StringBuilder s_marks = new StringBuilder();
+        /// <summary>記録した時点（名前と、プロセスの開始からの時間（ms））。記録する時に、時間の順に並べ替える。</summary>
+        private static readonly System.Collections.Generic.List<(string Name, double Ms)> s_marks =
+            new System.Collections.Generic.List<(string Name, double Ms)>();
         /// <summary>記録し終えたか（2 回目以降の Mark・Finish は何もしない）。</summary>
         private static bool s_finished;
 
@@ -2293,7 +2324,24 @@ namespace mdew
             {
                 if (!s_finished)
                 {
-                    s_marks.Append($" {a_name}={(DateTime.Now - s_processStart).TotalMilliseconds:0}ms");
+                    s_marks.Add((a_name, (DateTime.Now - s_processStart).TotalMilliseconds));
+                }
+            }
+        }
+
+        /// <summary>指定の時刻（1970-01-01 からの ms。画面側の performance.timeOrigin 等）を、プロセスの開始からの時間として
+        /// 覚えておく（TRACE_LOG の時だけ）。</summary>
+        /// <param name="a_name">時点の名前。</param>
+        /// <param name="a_unixMs">時刻（1970-01-01 UTC からの ms）。</param>
+        [System.Diagnostics.Conditional("TRACE_LOG")]
+        public static void MarkAt(string a_name, double a_unixMs)
+        {
+            double startUnixMs = new DateTimeOffset(s_processStart).ToUnixTimeMilliseconds();
+            lock (s_marks)
+            {
+                if (!s_finished)
+                {
+                    s_marks.Add((a_name, a_unixMs - startUnixMs));
                 }
             }
         }
@@ -2310,11 +2358,14 @@ namespace mdew
                 {
                     return;
                 }
-                s_marks.Append($" {a_name}={(DateTime.Now - s_processStart).TotalMilliseconds:0}ms");
+                s_marks.Add((a_name, (DateTime.Now - s_processStart).TotalMilliseconds));
                 s_finished = true;
-                text = s_marks.ToString();
+                // 時間の順に並べる（画面側の時刻は、画面の準備ができた時にまとめて届くため。同じ時間は記録した順）
+                var sorted = new System.Collections.Generic.List<(string Name, double Ms)>(s_marks);
+                sorted = System.Linq.Enumerable.ToList(System.Linq.Enumerable.OrderBy(sorted, m => m.Ms));
+                text = string.Join(" ", System.Linq.Enumerable.Select(sorted, m => $"{m.Name}={m.Ms:0}ms"));
             }
-            ErrorLog.Trace($"起動時間：{text.TrimStart()}");
+            ErrorLog.Trace($"起動時間：{text}");
         }
     }
 
@@ -2350,15 +2401,34 @@ namespace mdew
 
         /// <summary>前回キャッシュを消した時から、印が変わったか。</summary>
         /// <param name="a_stamp">今の印（Create）。</param>
+        /// <param name="a_reason">変わった時は、その理由（動作の記録用。ErrorLog.Trace）。</param>
         /// <returns>変わった（または分からない）なら true（キャッシュを消す）。</returns>
-        public static bool IsChanged(string a_stamp)
+        public static bool IsChanged(string a_stamp, out string a_reason)
         {
+            a_reason = null;
             try
             {
-                return null == a_stamp || !File.Exists(s_path) || a_stamp != File.ReadAllText(s_path);
+                if (null == a_stamp)
+                {
+                    a_reason = "印を作れなかった";
+                    return true;
+                }
+                if (!File.Exists(s_path))
+                {
+                    a_reason = "前回の印が無い";
+                    return true;
+                }
+                string saved = File.ReadAllText(s_path);
+                if (a_stamp != saved)
+                {
+                    a_reason = $"印が変わった（前回：{saved} 今回：{a_stamp}）";
+                    return true;
+                }
+                return false;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                a_reason = $"前回の印を読めなかった（{ex.Message}）";
                 return true;
             }
         }
