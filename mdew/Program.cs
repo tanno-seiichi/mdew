@@ -79,10 +79,13 @@ namespace mdew
             m_webViewEnvironment = CreateWebViewEnvironmentAsync();
             ContentRendered += (s, e) => { StartupTiming.Mark("ウィンドウ表示"); };
             // 起動直後に、ウィンドウの中が一瞬白く見えないようにする：ウィンドウを開いた直後は、WPF が最初の描画を終えるまで
-            // 中身が白いまま表示される（ダークテーマの時に目立つ）。そこで、最初の描画が終わるまでウィンドウを隠しておく
-            // （DWM のクローク。ウィンドウとしては表示されたままで、画面に映らないだけ）
-            SourceInitialized += (s, e) => SetCloak(true);
-            ContentRendered += (s, e) => SetCloak(false);
+            // 中身が白いまま表示される（ダークテーマの時に目立つ。Windows の開く時のアニメーションの間も白く見える）。
+            // そこで、最初の描画が終わるまでは、Windows がウィンドウの中を消す時（WM_ERASEBKGND）に、配色の背景色で塗る
+            // （PaintBackgroundBeforeRender）。ウィンドウを隠しておく方法（DWM のクローク）は、開く時のアニメーションが
+            // 出なくなるため使わない
+            SourceInitialized += (s, e) =>
+                HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(PaintBackgroundBeforeRender);
+            ContentRendered += (s, e) => { m_contentRendered = true; };
             m_startupPath = ResolveStartupPath(a_startupPath);
             m_startupBounds = ParsePlacement(a_placement, out m_startupMaximized);
             Title = $"{Program.AppName} v{Program.Version}";
@@ -134,24 +137,37 @@ namespace mdew
             Closed += (s, e) => Theme.Changed -= OnThemeChanged;
         }
 
-        [DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr a_window, int a_attribute, ref int a_value, int a_size);
+        [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+        [DllImport("user32.dll")] private static extern int FillRect(IntPtr hDC, ref RECT lprc, IntPtr hbr);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint crColor);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+        /// <summary>ウィンドウの中を消す時のメッセージ（wParam：描く先のデバイスコンテキスト）。</summary>
+        private const int WM_ERASEBKGND = 0x0014;
+        /// <summary>WPF が最初の描画を終えたか（ContentRendered）。</summary>
+        private bool m_contentRendered;
 
-        /// <summary>DwmSetWindowAttribute の DWMWA_CLOAK（ウィンドウを画面に映さない）。</summary>
-        private const int DWMWA_CLOAK = 13;
-
-        /// <summary>ウィンドウを画面に映さない・映す（DWM のクローク。起動直後の白い画面を見せないため。コンストラクター参照）。
-        /// 使えない環境では何もしない（白い画面が一瞬見えるだけ）。</summary>
-        /// <param name="a_cloak">映さないなら true。</param>
-        private void SetCloak(bool a_cloak)
+        /// <summary>WPF が最初の描画を終えるまで、ウィンドウの中を消す時（WM_ERASEBKGND）に、配色の背景色で塗る（起動直後に
+        /// 中身が白く見えないようにするため。コンストラクター参照）。描画を終えた後は何もしない（WPF の描画に任せる）。</summary>
+        /// <returns>処理したら 1。</returns>
+        private IntPtr PaintBackgroundBeforeRender(IntPtr a_hwnd, int a_msg, IntPtr a_wParam, IntPtr a_lParam, ref bool a_handled)
         {
-            IntPtr handle = new WindowInteropHelper(this).Handle;
-            if (IntPtr.Zero == handle)
+            if (WM_ERASEBKGND != a_msg || m_contentRendered || IntPtr.Zero == a_wParam)
             {
-                return;
+                return IntPtr.Zero;
             }
-            int value = a_cloak ? 1 : 0;
-            DwmSetWindowAttribute(handle, DWMWA_CLOAK, ref value, sizeof(int));
+            System.Drawing.Color color = Theme.WebBackground;
+            IntPtr brush = CreateSolidBrush((uint)(color.R | (color.G << 8) | (color.B << 16)));
+            if (IntPtr.Zero == brush)
+            {
+                return IntPtr.Zero;
+            }
+            if (GetClientRect(a_hwnd, out RECT rect))
+            {
+                FillRect(a_wParam, ref rect, brush);
+            }
+            DeleteObject(brush);
+            a_handled = true;
+            return new IntPtr(1);
         }
 
         /// <summary>WebView2 の環境を作る（裏で Edge のプロセスが起動する）。WebView2 の作業用のデータ（キャッシュ・
