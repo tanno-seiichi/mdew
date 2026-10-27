@@ -65,6 +65,10 @@ namespace mdew
         /// <summary>WebView2 の環境（裏で動く Edge のプロセス）を作る処理。起動を速くするため、ウィンドウを作る時に
         /// 始めておき、ウィンドウの表示と並行して進める（InitializeWebViewAsync で終わるのを待つ）。</summary>
         private readonly System.Threading.Tasks.Task<CoreWebView2Environment> m_webViewEnvironment;
+        /// <summary>WebView2 の User Data Folder（UDF）。</summary>
+        private readonly string m_webViewUserDataPath;
+        /// <summary>起動前から UDF が存在したか（初回作成時のキャッシュ削除を省略する）。</summary>
+        private readonly bool m_webViewUserDataExisted;
         /// <summary>起動時引数のファイルを開いて、画面に表示されるのを待っているところか（起動時間の記録用。StartupTiming 参照）。</summary>
         private bool m_startupLoadPending;
         /// <summary>このウィンドウ専用の、貼り付けた画像の一時フォルダ（閉じる時に削除する）。</summary>
@@ -76,7 +80,10 @@ namespace mdew
         public MainWindow(string a_startupPath, string a_placement)
         {
             // WebView2 の環境を作り始める（時間がかかるので、ウィンドウの作成・表示と並行して進める）
-            m_webViewEnvironment = CreateWebViewEnvironmentAsync();
+            m_webViewUserDataPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "WebView2");
+            m_webViewUserDataExisted = Directory.Exists(m_webViewUserDataPath);
+            m_webViewEnvironment = CreateWebViewEnvironmentAsync(m_webViewUserDataPath, m_webViewUserDataExisted);
             ContentRendered += (s, e) => { StartupTiming.Mark("ウィンドウ表示"); };
             // 起動直後に、ウィンドウの中が一瞬白く見えないようにする：ウィンドウを開いた直後は、WPF が最初の描画を終えるまで
             // 中身が白いまま表示される（ダークテーマの時に目立つ）。そこで、最初の描画が終わるまでウィンドウを隠しておく
@@ -157,11 +164,12 @@ namespace mdew
         /// <summary>WebView2 の環境を作る（裏で Edge のプロセスが起動する）。WebView2 の作業用のデータ（キャッシュ・
         /// localStorage 等）は %LOCALAPPDATA%\&lt;アセンブリ名&gt;\WebView2 に置く。</summary>
         /// <returns>作った環境。</returns>
-        private static async System.Threading.Tasks.Task<CoreWebView2Environment> CreateWebViewEnvironmentAsync()
+        private static async System.Threading.Tasks.Task<CoreWebView2Environment> CreateWebViewEnvironmentAsync(string a_userData, bool a_userDataExisted)
         {
-            string userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.AssemblyName, "WebView2");
-            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, userData);
+            ErrorLog.Trace($"WebView2 UDF：{a_userData} 起動前存在={a_userDataExisted}");
+            StartupTiming.Mark("WebView2環境作成開始");
+            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, a_userData);
+            ErrorLog.Trace($"WebView2 Runtime：{env.BrowserVersionString}");
             StartupTiming.Mark("WebView2の環境");
             return env;
         }
@@ -173,6 +181,7 @@ namespace mdew
         {
             // 環境は、ウィンドウを作った時に作り始めている（CreateWebViewEnvironmentAsync）
             var env = await m_webViewEnvironment;
+            StartupTiming.Mark("EnsureCoreWebView2開始");
             await m_webView.EnsureCoreWebView2Async(env);
             StartupTiming.Mark("WebView2の準備");
             var core = m_webView.CoreWebView2;
@@ -182,12 +191,19 @@ namespace mdew
             // 前回消した時から変わった時だけ（起動のたびに消すと、その分起動が遅くなるため。WebCacheStamp 参照）
             string webDir = Path.Combine(AppContext.BaseDirectory, "web");
             string stamp = WebCacheStamp.Create(webDir);
-            if (WebCacheStamp.IsChanged(stamp))
+            if (m_webViewUserDataExisted && WebCacheStamp.IsChanged(stamp))
             {
+                StartupTiming.Mark("キャッシュ削除開始");
                 await core.Profile.ClearBrowsingDataAsync(
                     CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage);
                 WebCacheStamp.Save(stamp);
                 StartupTiming.Mark("キャッシュ削除");
+            }
+            else if (!m_webViewUserDataExisted)
+            {
+                ErrorLog.Trace("WebView2 UDF 新規作成のため、初回のキャッシュ削除を省略");
+                WebCacheStamp.Save(stamp);
+                StartupTiming.Mark("キャッシュ削除省略（新規UDF）");
             }
 
             // Ctrl+R での再読み込み等で編集中の内容が消えないよう、ブラウザ用のショートカットは無効にする。
@@ -216,6 +232,21 @@ namespace mdew
                 }
             };
             core.WebMessageReceived += OnWebMessage;
+            core.NavigationStarting += (s, e) =>
+            {
+                StartupTiming.Mark($"NavigationStarting(id={e.NavigationId})");
+                ErrorLog.Trace($"NavigationStarting：id={e.NavigationId} uri={e.Uri}");
+            };
+            core.DOMContentLoaded += (s, e) =>
+            {
+                StartupTiming.Mark($"DOMContentLoaded(id={e.NavigationId})");
+                ErrorLog.Trace($"DOMContentLoaded：id={e.NavigationId}");
+            };
+            core.NavigationCompleted += (s, e) =>
+            {
+                StartupTiming.Mark($"NavigationCompleted(id={e.NavigationId})");
+                ErrorLog.Trace($"NavigationCompleted：id={e.NavigationId} 成功={e.IsSuccess} エラー={e.WebErrorStatus}");
+            };
             // 右クリックのメニューの「貼り付け」で、画面側からクリップボードを読めるようにする
             // （許可しないと、読み取るたびに確認の表示が出る。web\js\editor.js の pasteFromClipboard 参照）
             core.PermissionRequested += (s, e) =>
@@ -232,7 +263,9 @@ namespace mdew
             };
             // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）
             await core.AddScriptToExecuteOnDocumentCreatedAsync($"window.__mdewTheme = {JsonSerializer.Serialize(Theme.CreateMessage())};");
+            StartupTiming.Mark("Navigate開始");
             core.Navigate($"https://{APP_HOST}/index.html");
+            StartupTiming.Mark("Navigate完了");
         }
 
         /// <summary>配色（Theme.cs）が変わった時：背景と、画面側の配色を合わせ直す。</summary>
@@ -294,6 +327,8 @@ namespace mdew
             switch (cmd)
             {
                 case "ready":
+                    StartupTiming.Mark("JS ready");
+                    ErrorLog.Trace("JS ready メッセージ受信");
                     StartupTiming.Mark("画面の準備");
                     // 配色（ライト・ダーク。Theme.cs）
                     Post(Theme.CreateMessage());
