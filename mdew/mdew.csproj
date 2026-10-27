@@ -46,6 +46,9 @@
   <PropertyGroup Condition="'$(TraceLog)' == 'true'">
     <DefineConstants>$(DefineConstants);TRACE_LOG</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <DefineConstants>$(DefineConstants);TRACE_LOG</DefineConstants>
+  </PropertyGroup>
 
   <ItemGroup>
     <!-- NuGet のパッケージを追加・更新した時は、インストーラー側の msi\THIRD-PARTY-NOTICES.txt
