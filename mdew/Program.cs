@@ -65,6 +65,10 @@ namespace mdew
         /// <summary>WebView2 の環境（裏で動く Edge のプロセス）を作る処理。起動を速くするため、ウィンドウを作る時に
         /// 始めておき、ウィンドウの表示と並行して進める（InitializeWebViewAsync で終わるのを待つ）。</summary>
         private readonly System.Threading.Tasks.Task<CoreWebView2Environment> m_webViewEnvironment;
+        /// <summary>ブラウザのキャッシュを消すかどうかの確認（WebCacheStamp.Check。web フォルダのすべてのファイルの更新日時を
+        /// 調べるので、時間がかかることがある）。起動を速くするため、ウィンドウを作る時に裏のスレッドで始めておき、
+        /// WebView2 の準備と並行して進める（InitializeWebViewAsync で終わるのを待つ）。</summary>
+        private readonly System.Threading.Tasks.Task<WebCacheStamp.Result> m_webCacheCheck;
         /// <summary>起動時引数のファイルを開いて、画面に表示されるのを待っているところか（起動時間の記録用。StartupTiming 参照）。</summary>
         private bool m_startupLoadPending;
         /// <summary>このウィンドウ専用の、貼り付けた画像の一時フォルダ（閉じる時に削除する）。</summary>
@@ -77,6 +81,8 @@ namespace mdew
         {
             // WebView2 の環境を作り始める（時間がかかるので、ウィンドウの作成・表示と並行して進める）
             m_webViewEnvironment = CreateWebViewEnvironmentAsync();
+            // ブラウザのキャッシュを消すかどうかの確認も、裏のスレッドで始めておく
+            m_webCacheCheck = System.Threading.Tasks.Task.Run(() => WebCacheStamp.Check(WebDir));
             ContentRendered += (s, e) => { StartupTiming.Mark("ウィンドウ表示"); };
             // 起動直後に、ウィンドウの中が一瞬白く見えないようにする：ウィンドウを開いた直後は、WPF が最初の描画を終えるまで
             // 中身が白いまま表示される（ダークテーマの時に目立つ。Windows の開く時のアニメーションの間も白く見える）。
@@ -193,6 +199,9 @@ namespace mdew
             }
         }
 
+        /// <summary>画面側（HTML・JavaScript・CSS）のファイルのフォルダ（実行フォルダの web）。</summary>
+        private static string WebDir => Path.Combine(AppContext.BaseDirectory, "web");
+
         /// <summary>WebView2 の環境を作る（裏で Edge のプロセスが起動する）。WebView2 の作業用のデータ（キャッシュ・
         /// localStorage 等）は %LOCALAPPDATA%\&lt;アセンブリ名&gt;\WebView2 に置く。</summary>
         /// <returns>作った環境。</returns>
@@ -215,18 +224,23 @@ namespace mdew
             await m_webView.EnsureCoreWebView2Async(env);
             StartupTiming.Mark("WebView2の準備");
             var core = m_webView.CoreWebView2;
+            // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）。
+            // 登録は Edge のプロセスとのやり取りで時間がかかるので、先に始めておき、画面を読み込む前に終わるのを待つ
+            var themeScript = core.AddScriptToExecuteOnDocumentCreatedAsync(
+                $"window.__mdewTheme = {JsonSerializer.Serialize(Theme.CreateMessage())};");
 
             // 画面側（web フォルダ）のファイルを更新した時に、前回読み込んだ古いファイルがブラウザの
             // キャッシュから使われてしまわないよう、キャッシュを消す。消すのは、web フォルダのファイル・mdew.dll が
-            // 前回消した時から変わった時だけ（起動のたびに消すと、その分起動が遅くなるため。WebCacheStamp 参照）
-            string webDir = Path.Combine(AppContext.BaseDirectory, "web");
-            string stamp = WebCacheStamp.Create(webDir);
-            if (WebCacheStamp.IsChanged(stamp, out string cacheReason))
+            // 前回消した時から変わった時だけ（起動のたびに消すと、その分起動が遅くなるため。WebCacheStamp 参照）。
+            // 確認は、ウィンドウを作る時に裏のスレッドで始めている（m_webCacheCheck）
+            WebCacheStamp.Result cache = await m_webCacheCheck;
+            StartupTiming.Mark("キャッシュの確認");
+            if (cache.Changed)
             {
-                ErrorLog.Trace($"ブラウザのキャッシュを削除：{cacheReason}");
+                ErrorLog.Trace($"ブラウザのキャッシュを削除：{cache.Reason}");
                 await core.Profile.ClearBrowsingDataAsync(
                     CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage);
-                WebCacheStamp.Save(stamp);
+                WebCacheStamp.Save(cache.Stamp);
                 StartupTiming.Mark("キャッシュ削除");
             }
 
@@ -238,7 +252,7 @@ namespace mdew
             // （web\js\main.js の setZoom）
             core.Settings.IsZoomControlEnabled = false;
 
-            core.SetVirtualHostNameToFolderMapping(APP_HOST, webDir, CoreWebView2HostResourceAccessKind.Allow);
+            core.SetVirtualHostNameToFolderMapping(APP_HOST, WebDir, CoreWebView2HostResourceAccessKind.Allow);
             // 文書内の画像（相対パス）は https://doc.mdew/<世代>/<相対パス> として要求されるので、
             // 開いているファイルのフォルダから読んで返す（ServeDocumentResource 参照）。
             core.AddWebResourceRequestedFilter($"https://{DOC_HOST}/*", CoreWebView2WebResourceContext.All);
@@ -270,8 +284,8 @@ namespace mdew
                 // WebView2 側（ブラウザ・画面表示のプロセス）が異常終了した場合の記録
                 ErrorLog.Write($"WebView2 のプロセスが異常終了：種類={e.ProcessFailedKind} 理由={e.Reason} 終了コード={e.ExitCode} {e.ProcessDescription}", null);
             };
-            // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）
-            await core.AddScriptToExecuteOnDocumentCreatedAsync($"window.__mdewTheme = {JsonSerializer.Serialize(Theme.CreateMessage())};");
+            // 最初の配色の登録（上で始めたもの）が終わってから、画面を読み込む
+            await themeScript;
             StartupTiming.Mark("画面の読み込みの指示");
             core.Navigate($"https://{APP_HOST}/index.html");
         }
@@ -2298,6 +2312,8 @@ namespace mdew
     ///   ウィンドウ表示：ウィンドウが最初に表示された
     ///   WebView2の環境：裏で動く Edge のプロセスが起動した
     ///   WebView2の準備：ウィンドウの中の WebView2 が使えるようになった
+    ///   キャッシュの確認：ブラウザのキャッシュを消すかどうかの確認が終わった（WebCacheStamp.Check。裏のスレッドで
+    ///     ウィンドウを作る時から始めているので、WebView2の準備より前に終わっていれば、WebView2の準備とほぼ同じ時間になる）
     ///   キャッシュ削除：web フォルダのファイルが更新されていたので、ブラウザのキャッシュを消した（消さなかった時は出ない）
     ///   画面の読み込みの指示：WebView2 に画面（web\index.html）を読み込むよう指示した
     ///   画面の読み込み開始：画面側が読み込みを始めた（以下、画面側の時刻。MainWindow.MarkWebTiming）
@@ -2391,12 +2407,31 @@ namespace mdew
                 {
                     newest = Math.Max(newest, File.GetLastWriteTimeUtc(file).Ticks);
                 }
-                return $"{Program.Version} {AppContext.BaseDirectory} {newest}";
+                // 実行フォルダの場所は入れない。別名のドライブ（subst 等）から同じフォルダの mdew を起動した時に、
+                // 場所の書き方が違うだけで、キャッシュを無駄に消さないため（中身が違えば、更新日時が変わる）
+                return $"{Program.Version} {newest}";
             }
             catch (Exception)
             {
                 return null;
             }
+        }
+
+        /// <summary>確認の結果（Check）。</summary>
+        /// <param name="Stamp">今の印（Create。作れなかった時は null）。</param>
+        /// <param name="Changed">前回キャッシュを消した時から変わった（または分からない）か（true ならキャッシュを消す）。</param>
+        /// <param name="Reason">変わった時は、その理由（動作の記録用。ErrorLog.Trace）。</param>
+        public readonly record struct Result(string Stamp, bool Changed, string Reason);
+
+        /// <summary>今の印を作り、前回キャッシュを消した時から変わったかを調べる（ファイルの読み込みだけなので、裏のスレッドで
+        /// 呼べる。MainWindow のコンストラクター）。</summary>
+        /// <param name="a_webDir">web フォルダのパス。</param>
+        /// <returns>確認の結果。</returns>
+        public static Result Check(string a_webDir)
+        {
+            string stamp = Create(a_webDir);
+            bool changed = IsChanged(stamp, out string reason);
+            return new Result(stamp, changed, reason);
         }
 
         /// <summary>前回キャッシュを消した時から、印が変わったか。</summary>

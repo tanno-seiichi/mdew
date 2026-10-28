@@ -50,6 +50,34 @@
     <DefineConstants>$(DefineConstants);TRACE_LOG</DefineConstants>
   </PropertyGroup>
 
+  <!-- 起動を速くするため、Release でビルドした時は、mdew.dll を ReadyToRun の形（あらかじめネイティブコードにコンパイル
+       した形）にする。起動時の JIT（実行時のコンパイル）が減る（mdew.dll のファイルは大きくなる）。
+       ReadyToRun は本来、発行（publish）の時だけ作られるので、ビルドの後に発行の処理を obj の中のフォルダに行い
+       （NoBuild：ビルドし直さない）、できた mdew.dll を実行フォルダ（bin\Release\net10.0-windows）の mdew.dll と
+       置き換える（msi\File.wxs は、このフォルダのファイルを同梱する）。
+       PublishReadyToRun：ビルド前のパッケージの復元（restore）で、ReadyToRun のコンパイラー等のパッケージを取得するため、
+       Debug の時も true にしておく（発行しない時は何もしない）。最初のビルドの時だけ、パッケージの取得に時間がかかる。
+       WebView2 の DLL（Microsoft.Web.WebView2.*.dll）は、Microsoft が配布しているものをそのまま同梱するので対象にしない。
+       使わない時は、dotnet build -p:ReadyToRunBuild=false でビルドする -->
+  <PropertyGroup>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <ReadyToRunBuild Condition="'$(ReadyToRunBuild)' == ''">true</ReadyToRunBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <PublishReadyToRunExclude Include="Microsoft.Web.WebView2.Core.dll" />
+    <PublishReadyToRunExclude Include="Microsoft.Web.WebView2.Wpf.dll" />
+  </ItemGroup>
+  <Target Name="ReadyToRunBuildOutput" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' And '$(ReadyToRunBuild)' == 'true' And '$(_ReadyToRunBuildInner)' != 'true'">
+    <PropertyGroup>
+      <_ReadyToRunBuildDir>$([MSBuild]::NormalizeDirectory($(MSBuildProjectDirectory), $(IntermediateOutputPath), 'r2rpublish'))</_ReadyToRunBuildDir>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish"
+             Properties="NoBuild=true;_ReadyToRunBuildInner=true;PublishDir=$(_ReadyToRunBuildDir)" />
+    <Copy SourceFiles="$(_ReadyToRunBuildDir)$(TargetFileName)" DestinationFolder="$(OutDir)" />
+    <Message Importance="high" Text="ReadyToRun：$(OutDir)$(TargetFileName)" />
+  </Target>
+
   <ItemGroup>
     <!-- NuGet のパッケージを追加・更新した時は、インストーラー側の msi\THIRD-PARTY-NOTICES.txt
          （バージョン・ライセンス文）と msi\File.wxs（同梱するファイル）も直す -->

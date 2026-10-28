@@ -132,6 +132,17 @@ Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js �
   （`MainWindow.CreateWebViewEnvironmentAsync`）。
 - ブラウザのキャッシュは、web フォルダのファイル・mdew.dll が前回消した時から変わった時だけ消します（`WebCacheStamp`。
   前回の印は `%LocalAppData%\mdew\webcache.stamp`）。web フォルダのファイルを書き換えても、古いファイルが使われることはありません。
+  印は、アプリのバージョンと、web フォルダのファイル・mdew.dll の一番新しい更新日時です。実行フォルダの場所は入れません
+  （別名のドライブから同じフォルダの mdew を起動した時に、無駄に消さないため）。
+  消すかどうかの確認（web フォルダのすべてのファイルの更新日時を調べる）は、ウィンドウを作る時に裏のスレッドで始め、
+  WebView2 の準備と並行して進めます（`MainWindow.m_webCacheCheck`）。
+- 最初の配色を画面側に渡すスクリプトの登録（`AddScriptToExecuteOnDocumentCreatedAsync`）も、WebView2 の準備ができてすぐに始め、
+  キャッシュの確認・削除等と並行して進めます（画面を読み込む前に終わるのを待ちます）。
+- Release でビルドした時は、mdew.dll を ReadyToRun の形（あらかじめネイティブコードにコンパイルした形）にします
+  （`mdew.csproj` の `ReadyToRunBuildOutput`）。起動時の JIT（実行時のコンパイル）が減ります。ReadyToRun は本来、発行（publish）の
+  時だけ作られるので、ビルドの後に obj の中のフォルダへ発行して、できた mdew.dll で実行フォルダの mdew.dll を置き換えます
+  （インストーラーは実行フォルダのファイルを同梱します）。最初のビルドの時は、ReadyToRun のコンパイラー等のパッケージを
+  NuGet から取得します。使わない時は `-p:ReadyToRunBuild=false` を付けてビルドします。
 - .NET のマルチコア JIT（`ProfileOptimization`）を使います。前回の起動でコンパイルしたメソッドを
   `%LocalAppData%\mdew\startup.jitprofile` に記録しておき、次回の起動では別のスレッドで先にコンパイルします（2 回目の起動から効きます）。
 
@@ -150,6 +161,7 @@ error.log は作られません）。
 | ウィンドウ表示 | ウィンドウが最初に表示された |
 | WebView2の環境 | 裏で動く Edge のプロセスが起動した |
 | WebView2の準備 | ウィンドウの中の WebView2 が使えるようになった |
+| キャッシュの確認 | キャッシュを消すかどうかの確認が終わった（裏で先に終わっていれば「WebView2の準備」とほぼ同じ時間になる） |
 | キャッシュ削除 | web フォルダのファイルが更新されていたので、キャッシュを消した（消さなかった時は出ない。消した理由は、別の行に「ブラウザのキャッシュを削除：…」と書く） |
 | 画面の読み込みの指示 | WebView2 に画面（`web\index.html`）を読み込むよう指示した |
 | 画面の読み込み開始 | 画面側が読み込みを始めた（ここから「main.js開始」までは画面側の時刻。`main.js` の `startupTiming`） |
