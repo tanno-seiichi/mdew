@@ -136,8 +136,8 @@ Visual Studio で `mdew.sln` を開いてビルドするだけです（Node.js �
   （別名のドライブから同じフォルダの mdew を起動した時に、無駄に消さないため）。
   消すかどうかの確認（web フォルダのすべてのファイルの更新日時を調べる）は、ウィンドウを作る時に裏のスレッドで始め、
   WebView2 の準備と並行して進めます（`MainWindow.m_webCacheCheck`）。
-- 最初の配色を画面側に渡すスクリプトの登録（`AddScriptToExecuteOnDocumentCreatedAsync`）も、WebView2 の準備ができてすぐに始め、
-  キャッシュの確認・削除等と並行して進めます（画面を読み込む前に終わるのを待ちます）。
+- 最初の配色は、画面の URL（`index.html?theme=…`。theme のメッセージの JSON）で画面側に渡します。
+  `AddScriptToExecuteOnDocumentCreatedAsync` で渡すと、登録が終わるのを待つのに 0.3〜0.9 秒かかることがあったためです。
 - Release でビルドした時は、mdew.dll を ReadyToRun の形（あらかじめネイティブコードにコンパイルした形）にします
   （`mdew.csproj` の `ReadyToRunBuildOutput`）。起動時の JIT（実行時のコンパイル）が減ります。ReadyToRun は本来、発行（publish）の
   時だけ作られるので、ビルドの後に obj の中のフォルダへ発行して、できた mdew.dll で実行フォルダの mdew.dll を置き換えます
@@ -169,5 +169,6 @@ error.log は作られません）。
 | CSS | `app.css` を読み終えた |
 | js | js のファイルをすべて読み終えた |
 | main.js開始 | `main.js` の実行が始まった（読み込んだ js のファイルの実行が終わった） |
+| 画面の準備の送信 | 画面側が準備を終えて、ready を送った（画面側の時刻） |
 | 画面の準備 | 画面側（`web\index.html`・js）の準備ができた |
 | ファイル表示 | 起動時引数のファイルを画面に表示した（開くファイルが無い時は「ファイル無し」） |

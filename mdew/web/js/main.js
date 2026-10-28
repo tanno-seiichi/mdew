@@ -1899,9 +1899,14 @@ function applyTheme(a_theme) {
   if (a_theme.mode) themeMode = a_theme.mode;
   document.body.classList.toggle('theme-dark', !!a_theme.dark);
 }
-// 最初の配色：ホストが文書を作る時に入れておく（Program.cs の InitializeWebViewAsync）。画面が一瞬白く表示されない
-// よう、theme のメッセージを待たずに合わせる
-if (window.__mdewTheme) applyTheme(window.__mdewTheme);
+// 最初の配色：ホストが画面の URL の theme に入れておく（theme のメッセージの JSON。Program.cs の InitializeWebViewAsync）。
+// 画面が一瞬白く表示されないよう、theme のメッセージを待たずに合わせる
+try {
+  const initialTheme = new URLSearchParams(location.search).get('theme');
+  if (initialTheme) applyTheme(JSON.parse(initialTheme));
+} catch {
+  // 読めなくても、ホストから theme のメッセージが届いた時に合わせる
+}
 
 /**
  * ファイルを開くのを待っている要求があれば、結果を渡す。
@@ -2161,15 +2166,18 @@ window.__mdeTest = {
 
 /**
  * 画面の読み込みの各時点（ホストの起動時間の記録用。Program.cs の MarkWebTiming。記録するのは TRACE_LOG の時だけ）。
- * @returns {{origin: number, html: number, css: number, js: number, main: number}} origin：読み込み開始の時刻
+ * @returns {{origin: number, html: number, css: number, js: number, main: number, ready: number}} origin：読み込み開始の時刻
  *   （1970-01-01 からの ms）、ほか：そこからの時間（ms。html：index.html、css：app.css、js：js のファイルをすべて読み終えた、
- *   main：main.js の実行が始まった）
+ *   main：main.js の実行が始まった、ready：準備を終えて ready を送る）
  */
 function startupTiming() {
   const nav = performance.getEntriesByType('navigation')[0];
   const resources = performance.getEntriesByType('resource');
   const lastEnd = (a_ext) => Math.max(0, ...resources.filter((r) => r.name.split('?')[0].endsWith(a_ext)).map((r) => r.responseEnd));
-  return { origin: performance.timeOrigin, html: nav ? nav.responseEnd : 0, css: lastEnd('.css'), js: lastEnd('.js'), main: MAIN_START };
+  return {
+    origin: performance.timeOrigin, html: nav ? nav.responseEnd : 0, css: lastEnd('.css'), js: lastEnd('.js'), main: MAIN_START,
+    ready: performance.now(),
+  };
 }
 
 // ---- 起動 -----------------------------------------------------------------

@@ -179,7 +179,7 @@ namespace mdew
         /// <summary>画面側から ready で届いた、画面の読み込みの各時点（main.js の startupTiming）を、起動時間の記録に加える
         /// （TRACE_LOG の時だけ。StartupTiming）。</summary>
         /// <param name="a_msg">ready のメッセージ（timing：origin（読み込み開始の時刻。1970-01-01 からの ms）と、そこからの
-        /// html・css・js・main の時間（ms））。</param>
+        /// html・css・js・main・ready の時間（ms））。</param>
         [System.Diagnostics.Conditional("TRACE_LOG")]
         private static void MarkWebTiming(JsonElement a_msg)
         {
@@ -190,7 +190,7 @@ namespace mdew
             }
             double origin = originElement.GetDouble();
             StartupTiming.MarkAt("画面の読み込み開始", origin);
-            foreach ((string key, string name) in new[] { ("html", "HTML"), ("css", "CSS"), ("js", "js"), ("main", "main.js開始") })
+            foreach ((string key, string name) in new[] { ("html", "HTML"), ("css", "CSS"), ("js", "js"), ("main", "main.js開始"), ("ready", "画面の準備の送信") })
             {
                 if (timing.TryGetProperty(key, out JsonElement value) && JsonValueKind.Number == value.ValueKind && value.GetDouble() > 0)
                 {
@@ -224,10 +224,6 @@ namespace mdew
             await m_webView.EnsureCoreWebView2Async(env);
             StartupTiming.Mark("WebView2の準備");
             var core = m_webView.CoreWebView2;
-            // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）。
-            // 登録は Edge のプロセスとのやり取りで時間がかかるので、先に始めておき、画面を読み込む前に終わるのを待つ
-            var themeScript = core.AddScriptToExecuteOnDocumentCreatedAsync(
-                $"window.__mdewTheme = {JsonSerializer.Serialize(Theme.CreateMessage())};");
 
             // 画面側（web フォルダ）のファイルを更新した時に、前回読み込んだ古いファイルがブラウザの
             // キャッシュから使われてしまわないよう、キャッシュを消す。消すのは、web フォルダのファイル・mdew.dll が
@@ -284,10 +280,12 @@ namespace mdew
                 // WebView2 側（ブラウザ・画面表示のプロセス）が異常終了した場合の記録
                 ErrorLog.Write($"WebView2 のプロセスが異常終了：種類={e.ProcessFailedKind} 理由={e.Reason} 終了コード={e.ExitCode} {e.ProcessDescription}", null);
             };
-            // 最初の配色の登録（上で始めたもの）が終わってから、画面を読み込む
-            await themeScript;
+            // 最初の配色（画面側の main.js が、読み込んですぐに合わせる。画面が一瞬白く表示されないように）は、画面の URL の
+            // theme（theme のメッセージの JSON）で渡す。AddScriptToExecuteOnDocumentCreatedAsync で渡すと、登録が終わるのを
+            // 待つのに 0.3〜0.9 秒かかることがあったため（Edge のプロセスとのやり取り。起動直後は Edge 側が忙しい）
+            string theme = Uri.EscapeDataString(JsonSerializer.Serialize(Theme.CreateMessage()));
             StartupTiming.Mark("画面の読み込みの指示");
-            core.Navigate($"https://{APP_HOST}/index.html");
+            core.Navigate($"https://{APP_HOST}/index.html?theme={theme}");
         }
 
         /// <summary>配色（Theme.cs）が変わった時：背景と、画面側の配色を合わせ直す。</summary>
@@ -2319,7 +2317,8 @@ namespace mdew
     ///   画面の読み込み開始：画面側が読み込みを始めた（以下、画面側の時刻。MainWindow.MarkWebTiming）
     ///   HTML：index.html を読み終えた　CSS：app.css を読み終えた　js：js のファイルをすべて読み終えた
     ///   main.js開始：main.js の実行が始まった（読み込んだ js のファイルの実行が終わった）
-    ///   画面の準備：画面側（web\index.html・js）の準備ができた（ready）
+    ///   画面の準備の送信：画面側が準備を終えて、ready を送った（画面側の時刻）
+    ///   画面の準備：画面側（web\index.html・js）の準備ができた（ready を受け取った）
     ///   ファイル表示：起動時引数のファイルを画面に表示した（ファイル無し：開くファイルが無かった）</summary>
     public static class StartupTiming
     {
