@@ -1,7 +1,7 @@
 // mdew：画面全体の動きと、C# 側ホスト（WebView2）とのやり取り。
 //
 // ホストとのメッセージ（JSON）:
-//   web → host : {cmd:'ready'} / {cmd:'open', newWindow} / {cmd:'save', markdown, saveAs, images} /
+//   web → host : {cmd:'ready'} / {cmd:'revealed'} / {cmd:'open', newWindow} / {cmd:'save', markdown, saveAs, images} /
 //                {cmd:'dirty', value} / {cmd:'newWindow'} / {cmd:'pasteImage', id, type, data} / {cmd:'imeOn'} /
 //                {cmd:'openUrl', url} / {cmd:'openRelative', path} / {cmd:'devTools'} / {cmd:'about'} /
 //                {cmd:'openFolder', relPath, newWindow} / {cmd:'listDir', path} / {cmd:'openPath', path} /
@@ -2047,10 +2047,12 @@ if (host) {
         openWaiter = null;
       }
     } else if ('focus' === msg.cmd) {
-      // 起動直後：ウィンドウが表示されたら、すぐに書き始められるよう編集領域にカーソルを置く。
-      // 起動時のファイルの load の後に届くので、ここで画面を見せる（上の「起動」の app-ready 参照）
+      // 起動直後：すぐに書き始められるよう編集領域にカーソルを置く。
+      // 起動時のファイルの load の後に届くので、ここで画面を見せて（下の「起動」の app-ready 参照）、ホストに知らせる
+      // （ホストは、これを受けてウィンドウを表示する。Program.cs の StartHidden）
       document.body.classList.add('app-ready');
       editor.focus();
+      send({ cmd: 'revealed' });
     } else if ('theme' === msg.cmd) {
       // 配色（起動時と、メニュー「表示」→「テーマ」・Windows の設定で変わった時に届く）
       applyTheme(msg);
