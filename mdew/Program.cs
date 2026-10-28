@@ -73,11 +73,8 @@ namespace mdew
         private bool m_startupLoadPending;
         /// <summary>起動時に、画面に最初の内容（起動時引数のファイル、または空の文書）を表示し終えたか（起動時間の記録用）。</summary>
         private bool m_startupContentShown;
-        /// <summary>ウィンドウを本来の位置に表示したか（RevealWindow。起動時は、画面の準備ができるまで画面の外に置く。
-        /// StartHidden 参照）。</summary>
+        /// <summary>ウィンドウを表示したか（RevealWindow。起動時は、画面の準備ができるまで表示しない。StartHidden 参照）。</summary>
         private bool m_revealed;
-        /// <summary>表示する時に最大化するか（前回終了時に最大化していた時。RestoreWindowPlacement）。</summary>
-        private bool m_showMaximized;
         /// <summary>画面の準備が終わらない時に、待つのをやめてウィンドウを表示するためのタイマー（StartHidden）。</summary>
         private System.Windows.Threading.DispatcherTimer m_revealTimer;
         /// <summary>画面の準備を待つ最長の時間（ms）。これを過ぎたら、準備の途中でもウィンドウを表示する（何も表示されないまま
@@ -300,26 +297,43 @@ namespace mdew
             core.Navigate($"https://{APP_HOST}/index.html?theme={theme}");
         }
 
-        /// <summary>ウィンドウを、画面の外に（タスクバーに出さず、アクティブにせずに）表示して、WebView2 の準備と画面の読み込みを
-        /// 始める。画面側が起動時の内容を表示し終えたら（revealed が届いたら）、本来の位置に表示し直す（RevealWindow）。
-        /// 先に空のウィンドウを表示すると、中身が出るまでの間（WebView2 の起動・画面の読み込み）白いウィンドウが見えて、
-        /// 起動が遅く見えるため、mde のように中身ごと表示する。ウィンドウを表示しないままにしないのは、WPF の WebView2 が、
-        /// ウィンドウを表示するまで準備を始めないため。準備が REVEAL_TIMEOUT_MS を過ぎても終わらない時は、待たずに表示する。</summary>
+        /// <summary>WebView2 の準備と画面の読み込みを、画面の外の仮のウィンドウ（m_stagingWindow）の中で始める。画面側が起動時の
+        /// 内容を表示し終えたら（revealed が届いたら）、WebView2 をこのウィンドウへ移して、このウィンドウを表示する（RevealWindow）。
+        /// 先に空のウィンドウを表示すると、中身が出るまでの間（WebView2 の起動・画面の読み込み）白いウィンドウが見えて、起動が
+        /// 遅く見えるため、mde のように中身ごと表示する。
+        /// 仮のウィンドウを使うのは、WPF の WebView2 は、表示したウィンドウの中でないと準備を始めず、Windows の開く時のアニメーション
+        /// は、ウィンドウを最初に表示した時にしか出ないため（このウィンドウを画面の外に表示してから戻すと、アニメーションが出ない）。
+        /// WebView2 は、別のウィンドウへ移しても、表示している内容はそのまま（WPF の WebView2 が、ブラウザのウィンドウを付け替える）。
+        /// 準備が REVEAL_TIMEOUT_MS を過ぎても終わらない時は、待たずに表示する。</summary>
         public async void StartHidden()
         {
-            ShowInTaskbar = false;
-            ShowActivated = false;
-            // 前回の位置が無い時（初めて起動した時）は画面の中央に置く。WPF に中央へ置かせると（CenterScreen）、表示する時に
-            // 位置が決まり、画面の外へ移せないため、ここで位置を決めておく
-            if (WindowStartupLocation.CenterScreen == WindowStartupLocation)
+            // 仮のウィンドウ：すべてのモニターの外（右側）に、タスクバーに出さず、アクティブにせずに表示する。大きさは、
+            // このウィンドウを表示する時の大きさに近くしておく（画面側の配置が、表示する時にできるだけ変わらないように）
+            var grid = (System.Windows.Controls.Grid)Content;
+            grid.Children.Remove(m_webView);
+            Size size = new Size(Width, Height);
+            WindowBounds bounds = m_startupBounds ?? m_settings.Window;
+            if (null != bounds && bounds.Right - bounds.Left >= 200 && bounds.Bottom - bounds.Top >= 150)
             {
-                WindowStartupLocation = WindowStartupLocation.Manual;
-                Rect workArea = SystemParameters.WorkArea;
-                Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
-                Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2);
+                DpiScale dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+                size = new Size((bounds.Right - bounds.Left) / dpi.DpiScaleX, (bounds.Bottom - bounds.Top) / dpi.DpiScaleY);
             }
-            // ウィンドウが作られたら（前回の位置・サイズを復元した後。RestoreWindowPlacement）、画面の外へ移す
-            SourceInitialized += (s, e) => MoveOffscreen();
+            m_stagingWindow = new Window
+            {
+                Title = Title,
+                WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth + 100,
+                Top = SystemParameters.VirtualScreenTop,
+                Width = size.Width,
+                Height = size.Height,
+                Background = Background,
+                Content = m_webView,
+            };
+            m_stagingWindow.Show();
             m_revealTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(REVEAL_TIMEOUT_MS) };
             m_revealTimer.Tick += (s, e) =>
             {
@@ -327,7 +341,6 @@ namespace mdew
                 RevealWindow();
             };
             m_revealTimer.Start();
-            Show();
             try
             {
                 await InitializeWebViewAsync();
@@ -340,30 +353,10 @@ namespace mdew
             }
         }
 
-        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
-        [DllImport("user32.dll")] private static extern int GetSystemMetrics(int nIndex);
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOZORDER = 0x0004;
-        private const uint SWP_NOACTIVATE = 0x0010;
-        private const int SM_XVIRTUALSCREEN = 76;
-        private const int SM_YVIRTUALSCREEN = 77;
-        private const int SM_CXVIRTUALSCREEN = 78;
-        /// <summary>画面の外へ移す前の、ウィンドウの位置・サイズ（RevealWindow で戻す）。</summary>
-        private WINDOWPLACEMENT m_revealPlacement;
+        /// <summary>WebView2 の準備に使う、画面の外の仮のウィンドウ（StartHidden。表示したら隠し、このウィンドウを閉じた時に閉じる）。</summary>
+        private Window m_stagingWindow;
 
-        /// <summary>ウィンドウを、すべてのモニターの外（右側）へ移す（StartHidden）。元の位置・サイズは m_revealPlacement に覚えておく。</summary>
-        private void MoveOffscreen()
-        {
-            IntPtr hwnd = new WindowInteropHelper(this).Handle;
-            m_revealPlacement = new WINDOWPLACEMENT { length = Marshal.SizeOf<WINDOWPLACEMENT>() };
-            GetWindowPlacement(hwnd, ref m_revealPlacement);
-            int x = GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN) + 100;
-            int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-            SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-
-        /// <summary>ウィンドウを、本来の位置に表示する（起動時に 1 回だけ。StartHidden 参照）。画面の外のウィンドウを一度隠してから、
-        /// 位置を戻して表示し直す（表示する時に、Windows の開く時のアニメーションが出るように）。</summary>
+        /// <summary>WebView2 を仮のウィンドウからこのウィンドウへ移して、このウィンドウを表示する（起動時に 1 回だけ。StartHidden 参照）。</summary>
         private void RevealWindow()
         {
             if (m_revealed)
@@ -373,30 +366,29 @@ namespace mdew
             m_revealed = true;
             m_revealTimer?.Stop();
             StartupTiming.Mark("表示の指示");
-            Hide();
-            IntPtr hwnd = new WindowInteropHelper(this).Handle;
-            if (0 != m_revealPlacement.length)
+            Window staging = m_stagingWindow;
+            m_stagingWindow = null;
+            if (null != staging)
             {
-                WINDOWPLACEMENT wp = m_revealPlacement;
-                wp.showCmd = SW_HIDE;
-                SetWindowPlacement(hwnd, ref wp);
-            }
-            ShowInTaskbar = true;
-            ShowActivated = true;
-            if (m_showMaximized)
-            {
-                WindowState = WindowState.Maximized;
+                staging.Content = null;
+                ((System.Windows.Controls.Grid)Content).Children.Insert(0, m_webView);
             }
             Show();
-            Activate();
+            if (null != staging)
+            {
+                // 仮のウィンドウは、隠しておき、このウィンドウを閉じた時に閉じる。WPF の WebView2 は、準備した時のウィンドウ
+                // （仮のウィンドウ）が閉じられると、自分も閉じてしまう（表示している内容が消える）ため、先に閉じない
+                staging.Hide();
+                Closed += (s, e) => staging.Close();
+            }
             // すぐに書き始められるよう、編集領域にキーボードの入力先を移す
             m_webView.Focus();
             StartupTiming.Mark("ウィンドウ表示");
             FinishStartupTiming();
         }
 
-        /// <summary>起動時間を記録する（TRACE_LOG の時だけ。StartupTiming）。記録するのは、ウィンドウを本来の位置に表示し
-        /// （RevealWindow）、起動時の内容（起動時引数のファイル、または空の文書）を表示し終えた後。</summary>
+        /// <summary>起動時間を記録する（TRACE_LOG の時だけ。StartupTiming）。記録するのは、ウィンドウを表示し（RevealWindow）、
+        /// 起動時の内容（起動時引数のファイル、または空の文書）を表示し終えた後。</summary>
         private void FinishStartupTiming()
         {
             if (m_revealed && m_startupContentShown)
@@ -2382,7 +2374,6 @@ namespace mdew
         }
         [DllImport("user32.dll")] private static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT wp);
         [DllImport("user32.dll")] private static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT wp);
-        private const int SW_HIDE = 0;
         private const int SW_SHOWNORMAL = 1;
         private const int SW_SHOWMINIMIZED = 2;
         private const int SW_SHOWMAXIMIZED = 3;
@@ -2399,14 +2390,11 @@ namespace mdew
             {
                 return; // 未保存、または異常に小さい値
             }
-            // 起動時は、画面の準備ができるまでウィンドウを画面の外に置くので（StartHidden）、ここでは位置・サイズだけを設定して、
-            // 表示しないままにしておく（SW_HIDE。SW_SHOWNORMAL 等にすると、その場で表示されてしまう）。最大化は、本来の位置に
-            // 表示する時に行う（RevealWindow）。最小化して終了した場合も含め、最小化状態では起動しない
-            m_showMaximized = maximized;
             var wp = new WINDOWPLACEMENT
             {
                 length = Marshal.SizeOf<WINDOWPLACEMENT>(),
-                showCmd = SW_HIDE,
+                // 最小化して終了した場合も含め、最小化状態では起動しない
+                showCmd = maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL,
                 rcNormalPosition = new RECT { Left = b.Left, Top = b.Top, Right = b.Right, Bottom = b.Bottom },
             };
             SetWindowPlacement(new WindowInteropHelper(this).Handle, ref wp);
@@ -2448,10 +2436,10 @@ namespace mdew
     ///   画面の準備の送信：画面側が準備を終えて、ready を送った（画面側の時刻）
     ///   画面の準備：画面側（web\index.html・js）の準備ができた（ready を受け取った）
     ///   ファイル表示：起動時引数のファイルを画面に表示した（ファイル無し：開くファイルが無かった）
-    ///   表示の指示：画面の準備ができたので、ウィンドウを本来の位置に表示する（MainWindow.RevealWindow。準備を待ちきれずに表示した時は、
+    ///   表示の指示：画面の準備ができたので、ウィンドウを表示する（MainWindow.RevealWindow。準備を待ちきれずに表示した時は、
     ///     別の行に「画面の準備を待たずに表示」と書く）
-    ///   ウィンドウ表示：ウィンドウを本来の位置に表示した
-    /// 記録するのは、ウィンドウを本来の位置に表示し、起動時の内容を表示し終えた時（MainWindow.FinishStartupTiming）。</summary>
+    ///   ウィンドウ表示：ウィンドウを表示した
+    /// 記録するのは、ウィンドウを表示し、起動時の内容を表示し終えた時（MainWindow.FinishStartupTiming）。</summary>
     public static class StartupTiming
     {
         /// <summary>プロセスの開始日時。</summary>
