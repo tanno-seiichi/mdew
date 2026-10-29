@@ -102,13 +102,28 @@
       インストールでチェックを入れていた、または14.88〜14.90節の時点のバージョンで
       無条件に追加されていた）かどうかを、実際のレジストリの状態から判定する
       プロパティ。AppSearch（RegistrySearchの標準動作）により、UI・実行の両
-      シーケンスでインストール前に自動的に値がセットされる。OpenWithMdeFileVerb.
+      シーケンスでインストール前に自動的に値がセットされる。OpenWithMdewFileVerb.
       Componentのキーパス（既定値／Name属性なし）を検索対象にしている。片方の
       Componentだけが単独で存在する状態は無い設計のため、これだけで足りる。
     -->
     <Property Id="CONTEXTMENU_ALREADY_ADDED" Secure="yes">
-      <RegistrySearch Id="OpenWithMdeRegistrySearch" Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Type="raw" />
+      <RegistrySearch Id="OpenWithMdewRegistrySearch" Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMdew" Type="raw" />
     </Property>
+
+    <!--
+      以前の版（キーの名前が mde と同じ OpenWithMde だった版。msi/File.wxs 参照）で追加した右クリックメニューの、
+      開くコマンド（"…\mdew.exe" "%1"）。mdew.exe を開く設定なら、以前の版の mdew で追加したもの（mde の
+      「mdeで開く」なら mde.exe）。その時は「既に追加済み」として扱い（SetContextMenuAddedFromOld）、新しい名前で
+      追加し直して、古い項目は消す（RemoveOldOpenWithMde.Component）。
+    -->
+    <Property Id="CONTEXTMENU_OLD_COMMAND" Secure="yes">
+      <RegistrySearch Id="OldOpenWithMdeRegistrySearch" Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde\command" Type="raw" />
+    </Property>
+
+    <CustomAction
+      Id="SetContextMenuAddedFromOld"
+      Property="CONTEXTMENU_ALREADY_ADDED"
+      Value="1" />
 
     <!--
       上記の判定で「既に追加済み」と分かった場合、確認画面（ContextMenuOptionDlg）を
@@ -187,8 +202,8 @@
         アップグレード時は右クリックメニューがまだ追加されていない場合のみ表示する
         （既に追加済みの場合は表示せず、確認するまでもなくそのまま維持する。
         14.91・14.92節参照）。チェックボックスの状態はADDCONTEXTMENUプロパティに
-        反映され、msi/File.wxsのOpenWithMdeFileVerb.Component・
-        OpenWithMdeFolderVerb.ComponentのConditionで参照している。チェックを
+        反映され、msi/File.wxsのOpenWithMdewFileVerb.Component・
+        OpenWithMdewFolderVerb.ComponentのConditionで参照している。チェックを
         入れなければ既定どおり追加しない。
       -->
       <Dialog Id="ContextMenuOptionDlg" Width="370" Height="270" Title="!(loc.ContextMenuOptionDlgTitle)">
@@ -236,7 +251,8 @@
           セットする。CONTEXTMENU_ALREADY_ADDEDはAppSearch（標準アクション）で
           セットされるプロパティのため、AppSearchの後に実行する必要がある。
         -->
-        <Custom Action="SetAddContextMenuFromExisting" After="AppSearch" Condition="CONTEXTMENU_ALREADY_ADDED" />
+        <Custom Action="SetContextMenuAddedFromOld" After="AppSearch" Condition="CONTEXTMENU_OLD_COMMAND ~&gt;&lt; &quot;mdew.exe&quot;" />
+        <Custom Action="SetAddContextMenuFromExisting" After="SetContextMenuAddedFromOld" Condition="CONTEXTMENU_ALREADY_ADDED" />
         <Show Dialog="WelcomeDlg" After="SetWelcomeMessageUpgrade" Condition="NOT Installed AND NOT WIX_DOWNGRADE_DETECTED" />
         <!--
           DowngradeErrorDlg は "LaunchConditions" より前に割り込ませます。
@@ -267,7 +283,8 @@
       置いてしまっており、実機のビルドでエラーになった（14.93節参照）。
     -->
     <InstallExecuteSequence>
-      <Custom Action="SetAddContextMenuFromExisting" After="AppSearch" Condition="CONTEXTMENU_ALREADY_ADDED" />
+      <Custom Action="SetContextMenuAddedFromOld" After="AppSearch" Condition="CONTEXTMENU_OLD_COMMAND ~&gt;&lt; &quot;mdew.exe&quot;" />
+      <Custom Action="SetAddContextMenuFromExisting" After="SetContextMenuAddedFromOld" Condition="CONTEXTMENU_ALREADY_ADDED" />
     </InstallExecuteSequence>
 
   </Fragment>

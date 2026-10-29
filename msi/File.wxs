@@ -32,16 +32,19 @@
 		<Component Id="Web.js.markdown.js.Component" Directory="WebJsFolder" Guid="*"><File Id="Web.js.markdown.js" Source="web\js\markdown.js" KeyPath="yes" /></Component>
 
 		<!-- エクスプローラーの右クリックメニューに「mdewで開く」を追加する（.mdファイル向け）。
+		     レジストリのキーの名前は、mde（同じ作者の別のアプリ）と別にする（OpenWithMdew）。同じ名前（OpenWithMde）だと、
+		     Guid="*" で作られるコンポーネントの GUID も同じになり、Windows インストーラーが mde と mdew で 1 つのものとして
+		     扱うため、mde をインストールしている時に mdew をアンインストールしても消えない（mde の項目も上書きしてしまう）。
 		     .mdファイルの既定アプリの設定とは関係なく（.mdをダブルクリックした時に開くアプリが
 		     何であっても）、SystemFileAssociationsの下に登録することで常にこの項目が表示される。
 		     ファイルを選択して実行すると、そのファイルを開く（MainWindow.ResolveStartupPath参照）。
 		     追加するかどうかはインストール時にユーザーへ確認する（ADDCONTEXTMENUプロパティ、
 		     既定は追加しない側。UpgradeConfirmDlg.wxsのContextMenuOptionDlg参照）。 -->
-		<Component Id="OpenWithMdeFileVerb.Component" Directory="INSTALLFOLDER" Guid="*" Condition="ADDCONTEXTMENU = &quot;1&quot;">
-			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Type="string" Value="!(loc.OpenWithMdeVerb)" KeyPath="yes" />
-			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Name="MUIVerb" Type="string" Value="!(loc.OpenWithMdeVerb)" />
-			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Name="Icon" Type="string" Value="[INSTALLFOLDER]mdew.exe,0" />
-			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde\command" Type="string" Value="&quot;[INSTALLFOLDER]mdew.exe&quot; &quot;%1&quot;" />
+		<Component Id="OpenWithMdewFileVerb.Component" Directory="INSTALLFOLDER" Guid="*" Condition="ADDCONTEXTMENU = &quot;1&quot;">
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMdew" Type="string" Value="!(loc.OpenWithMdeVerb)" KeyPath="yes" />
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMdew" Name="MUIVerb" Type="string" Value="!(loc.OpenWithMdeVerb)" />
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMdew" Name="Icon" Type="string" Value="[INSTALLFOLDER]mdew.exe,0" />
+			<RegistryValue Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMdew\command" Type="string" Value="&quot;[INSTALLFOLDER]mdew.exe&quot; &quot;%1&quot;" />
 		</Component>
 
 		<!-- エクスプローラーでフォルダの何もない場所を右クリックした時のコンテキストメニューにも
@@ -49,11 +52,21 @@
 		     状態で起動する（%Vはこの右クリックの対象フォルダのパスに展開される。
 		     MainWindow.ResolveStartupPath参照）。上記と同じADDCONTEXTMENUプロパティで
 		     まとめて追加要否を判定する（片方だけ追加する設定は無い）。 -->
-		<Component Id="OpenWithMdeFolderVerb.Component" Directory="INSTALLFOLDER" Guid="*" Condition="ADDCONTEXTMENU = &quot;1&quot;">
-			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Type="string" Value="!(loc.OpenWithMdeVerb)" KeyPath="yes" />
-			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Name="MUIVerb" Type="string" Value="!(loc.OpenWithMdeVerb)" />
-			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Name="Icon" Type="string" Value="[INSTALLFOLDER]mdew.exe,0" />
-			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMde\command" Type="string" Value="&quot;[INSTALLFOLDER]mdew.exe&quot; &quot;%V&quot;" />
+		<Component Id="OpenWithMdewFolderVerb.Component" Directory="INSTALLFOLDER" Guid="*" Condition="ADDCONTEXTMENU = &quot;1&quot;">
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMdew" Type="string" Value="!(loc.OpenWithMdeVerb)" KeyPath="yes" />
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMdew" Name="MUIVerb" Type="string" Value="!(loc.OpenWithMdeVerb)" />
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMdew" Name="Icon" Type="string" Value="[INSTALLFOLDER]mdew.exe,0" />
+			<RegistryValue Root="HKCR" Key="Directory\Background\shell\OpenWithMdew\command" Type="string" Value="&quot;[INSTALLFOLDER]mdew.exe&quot; &quot;%V&quot;" />
+		</Component>
+
+		<!-- 以前の版（キーの名前が mde と同じ OpenWithMde だった版）で追加した「mdewで開く」を消す。消すのは、その項目が
+		     mdew.exe を開く設定になっている時だけ（CONTEXTMENU_OLD_COMMAND。UpgradeConfirmDlg.wxs 参照）。mde の
+		     「mdeで開く」（mde.exe を開く設定）は消さない。以前の版の mdew で上書きされていた mde の項目は、mde の修復で
+		     元に戻る。キーパスは、このコンポーネントを入れた印（HKLM の mdew のキー）。 -->
+		<Component Id="RemoveOldOpenWithMde.Component" Directory="INSTALLFOLDER" Guid="*" Condition="CONTEXTMENU_OLD_COMMAND ~&gt;&lt; &quot;mdew.exe&quot;">
+			<RegistryValue Root="HKLM" Key="Software\tanno-seiichi\mdew" Name="OldContextMenuRemoved" Type="integer" Value="1" KeyPath="yes" />
+			<RemoveRegistryKey Root="HKCR" Key="SystemFileAssociations\.md\shell\OpenWithMde" Action="removeOnInstall" />
+			<RemoveRegistryKey Root="HKCR" Key="Directory\Background\shell\OpenWithMde" Action="removeOnInstall" />
 		</Component>
 
 		<!-- License -->
